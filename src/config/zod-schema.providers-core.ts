@@ -2,6 +2,12 @@ import { z } from "zod";
 import { isSafeScpRemoteHost } from "../infra/scp-host.js";
 import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js";
 import {
+  resolveDiscordPreviewStreamMode,
+  resolveSlackNativeStreaming,
+  resolveSlackStreamingMode,
+  resolveTelegramPreviewStreamMode,
+} from "./discord-preview-streaming.js";
+import {
   normalizeTelegramCommandDescription,
   normalizeTelegramCommandName,
   resolveTelegramCustomCommands,
@@ -99,25 +105,24 @@ const validateTelegramCustomCommands = (
   }
 };
 
-function normalizeTelegramStreamingConfig(value: {
-  streaming?: boolean;
-  streamMode?: "off" | "partial" | "block";
+function normalizeTelegramStreamingConfig(value: { streaming?: unknown; streamMode?: unknown }) {
+  value.streaming = resolveTelegramPreviewStreamMode(value);
+  delete value.streamMode;
+}
+
+function normalizeDiscordStreamingConfig(value: { streaming?: unknown; streamMode?: unknown }) {
+  value.streaming = resolveDiscordPreviewStreamMode(value);
+  delete value.streamMode;
+}
+
+function normalizeSlackStreamingConfig(value: {
+  streaming?: unknown;
+  nativeStreaming?: unknown;
+  streamMode?: unknown;
 }) {
-  if (typeof value.streaming === "boolean") {
-    delete value.streamMode;
-    return;
-  }
-  if (value.streamMode === "off") {
-    value.streaming = false;
-    delete value.streamMode;
-    return;
-  }
-  if (value.streamMode === "partial" || value.streamMode === "block") {
-    value.streaming = true;
-    delete value.streamMode;
-    return;
-  }
-  value.streaming = false;
+  value.nativeStreaming = resolveSlackNativeStreaming(value);
+  value.streaming = resolveSlackStreamingMode(value);
+  delete value.streamMode;
 }
 
 export const TelegramAccountSchemaBase = z
@@ -143,7 +148,7 @@ export const TelegramAccountSchemaBase = z
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
     textChunkLimit: z.number().int().positive().optional(),
     chunkMode: z.enum(["length", "newline"]).optional(),
-    streaming: z.boolean().optional(),
+    streaming: z.union([z.boolean(), z.enum(["off", "partial", "block", "progress"])]).optional(),
     blockStreaming: z.boolean().optional(),
     draftChunk: BlockStreamingChunkSchema.optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
@@ -155,6 +160,7 @@ export const TelegramAccountSchemaBase = z
     network: z
       .object({
         autoSelectFamily: z.boolean().optional(),
+        dnsResultOrder: z.enum(["ipv4first", "verbatim"]).optional(),
       })
       .strict()
       .optional(),
@@ -163,6 +169,7 @@ export const TelegramAccountSchemaBase = z
     webhookSecret: z.string().optional().register(sensitive),
     webhookPath: z.string().optional(),
     webhookHost: z.string().optional(),
+    webhookPort: z.number().int().positive().optional(),
     actions: z
       .object({
         reactions: z.boolean().optional(),
@@ -308,6 +315,8 @@ const DiscordVoiceSchema = z
   .object({
     enabled: z.boolean().optional(),
     autoJoin: z.array(DiscordVoiceAutoJoinSchema).optional(),
+    daveEncryption: z.boolean().optional(),
+    decryptionFailureTolerance: z.number().int().min(0).optional(),
     tts: TtsConfigSchema.optional(),
   })
   .strict()
@@ -324,6 +333,7 @@ export const DiscordAccountSchema = z
     token: z.string().optional().register(sensitive),
     proxy: z.string().optional(),
     allowBots: z.boolean().optional(),
+    dangerouslyAllowNameMatching: z.boolean().optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
@@ -332,7 +342,9 @@ export const DiscordAccountSchema = z
     chunkMode: z.enum(["length", "newline"]).optional(),
     blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
-    streamMode: z.enum(["partial", "block", "off"]).optional().default("off"),
+    // Canonical streaming mode. Legacy aliases (`streamMode`, boolean `streaming`) are auto-mapped.
+    streaming: z.union([z.boolean(), z.enum(["off", "partial", "block", "progress"])]).optional(),
+    streamMode: z.enum(["partial", "block", "off"]).optional(),
     draftChunk: BlockStreamingChunkSchema.optional(),
     maxLinesPerMessage: z.number().int().positive().optional(),
     mediaMaxMb: z.number().positive().optional(),
@@ -388,6 +400,15 @@ export const DiscordAccountSchema = z
       })
       .strict()
       .optional(),
+    threadBindings: z
+      .object({
+        enabled: z.boolean().optional(),
+        ttlHours: z.number().nonnegative().optional(),
+        spawnSubagentSessions: z.boolean().optional(),
+        spawnAcpSessions: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     intents: z
       .object({
         presence: z.boolean().optional(),
@@ -414,6 +435,8 @@ export const DiscordAccountSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    normalizeDiscordStreamingConfig(value);
+
     const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
     const hasActivity = Boolean(activityText);
     const hasActivityType = value.activityType !== undefined;
@@ -497,6 +520,7 @@ export const GoogleChatAccountSchema = z
     enabled: z.boolean().optional(),
     configWrites: z.boolean().optional(),
     allowBots: z.boolean().optional(),
+    dangerouslyAllowNameMatching: z.boolean().optional(),
     requireMention: z.boolean().optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
@@ -593,8 +617,9 @@ export const SlackAccountSchema = z
     userToken: z.string().optional().register(sensitive),
     userTokenReadOnly: z.boolean().optional().default(true),
     allowBots: z.boolean().optional(),
+    dangerouslyAllowNameMatching: z.boolean().optional(),
     requireMention: z.boolean().optional(),
-    groupPolicy: GroupPolicySchema.optional().default("allowlist"),
+    groupPolicy: GroupPolicySchema.optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
@@ -602,7 +627,9 @@ export const SlackAccountSchema = z
     chunkMode: z.enum(["length", "newline"]).optional(),
     blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
-    streaming: z.boolean().optional(),
+    streaming: z.union([z.boolean(), z.enum(["off", "partial", "block", "progress"])]).optional(),
+    nativeStreaming: z.boolean().optional(),
+    streamMode: z.enum(["replace", "status_final", "append"]).optional(),
     mediaMaxMb: z.number().positive().optional(),
     reactionNotifications: z.enum(["off", "own", "all", "allowlist"]).optional(),
     reactionAllowlist: z.array(z.union([z.string(), z.number()])).optional(),
@@ -644,6 +671,8 @@ export const SlackAccountSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    normalizeSlackStreamingConfig(value);
+
     const dmPolicy = value.dmPolicy ?? value.dm?.policy ?? "pairing";
     const allowFrom = value.allowFrom ?? value.dm?.allowFrom;
     const allowFromPath =
@@ -662,6 +691,7 @@ export const SlackConfigSchema = SlackAccountSchema.safeExtend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: z.string().optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),
+  groupPolicy: GroupPolicySchema.optional().default("allowlist"),
   accounts: z.record(z.string(), SlackAccountSchema.optional()).optional(),
 }).superRefine((value, ctx) => {
   const baseMode = value.mode ?? "socket";
@@ -1035,6 +1065,7 @@ export const MSTeamsConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
     capabilities: z.array(z.string()).optional(),
+    dangerouslyAllowNameMatching: z.boolean().optional(),
     markdown: MarkdownConfigSchema,
     configWrites: z.boolean().optional(),
     appId: z.string().optional(),
