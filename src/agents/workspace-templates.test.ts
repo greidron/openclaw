@@ -51,4 +51,24 @@ describe("resolveWorkspaceTemplateDir", () => {
     const resolved = await resolveWorkspaceTemplateDir({ cwd: distDir, moduleUrl });
     expect(path.normalize(resolved)).toBe(path.resolve("docs", "reference", "templates"));
   });
+
+  it("prefers OPENCLAW_WORKSPACE_TEMPLATE_DIR when set", async () => {
+    const root = await makeTempRoot();
+    await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "openclaw" }));
+
+    const customTemplatesDir = path.join(root, "custom-templates");
+    await fs.mkdir(customTemplatesDir, { recursive: true });
+    await fs.writeFile(path.join(customTemplatesDir, "AGENTS.md"), "# custom\n");
+
+    const distDir = path.join(root, "dist");
+    await fs.mkdir(distDir, { recursive: true });
+    const moduleUrl = pathToFileURL(path.join(distDir, "model-selection.mjs")).toString();
+
+    const resolved = await resolveWorkspaceTemplateDir({
+      cwd: distDir,
+      moduleUrl,
+      env: { OPENCLAW_WORKSPACE_TEMPLATE_DIR: "../custom-templates" },
+    });
+    expect(resolved).toBe(customTemplatesDir);
+  });
 });
