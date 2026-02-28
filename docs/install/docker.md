@@ -52,6 +52,7 @@ Optional env vars:
 - `OPENCLAW_DOCKER_APT_PACKAGES` — install extra apt packages during build
 - `OPENCLAW_EXTRA_MOUNTS` — add extra host bind mounts
 - `OPENCLAW_HOME_VOLUME` — persist `/home/node` in a named volume
+- `OPENCLAW_WORKSPACE_TEMPLATE_DIR` — set a custom workspace bootstrap template directory inside the container
 
 After it finishes:
 
