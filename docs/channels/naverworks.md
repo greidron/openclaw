@@ -56,4 +56,6 @@ openclaw plugins install ./extensions/naverworks
 - Non-direct events are ignored in phase 1 by design.
 - `strictBinding` defaults to `true`. When no binding matches, the plugin drops the event instead of falling back to the default agent.
 - Set `strictBinding: false` if you want default-agent fallback behavior for unmatched DMs.
+- `teamId` matching uses the event payload value from `source.teamId`, `source.domainId`, `source.tenantId`, `teamId`, `domainId`, or `tenantId` (first non-empty value wins).
+- To discover the exact `teamId` value for bindings, check gateway logs for lines like `processing inbound event userId=... teamId=...` or `strictBinding dropped event ... teamId=...`, then copy that value into `bindings[].match.teamId`.
 - Outbound delivery API integration is planned for the next phase.

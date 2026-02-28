@@ -108,12 +108,12 @@ export function createNaverWorksPlugin() {
               peer: { kind: "direct", id: event.userId },
             });
             log?.info?.(
-              `naverworks[${account.accountId}]: route resolved agentId=${route.agentId} matchedBy=${route.matchedBy} sessionKey=${route.sessionKey}`,
+              `naverworks[${account.accountId}]: route resolved agentId=${route.agentId} matchedBy=${route.matchedBy} sessionKey=${route.sessionKey}${event.teamId ? ` teamId=${event.teamId}` : ""}`,
             );
 
             if (account.strictBinding && route.matchedBy === "default") {
               log?.warn?.(
-                `naverworks: strictBinding dropped event for ${event.userId} (no matching binding)`,
+                `naverworks: strictBinding dropped event for ${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""} (no matching binding)`,
               );
               return;
             }

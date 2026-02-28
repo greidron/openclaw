@@ -149,7 +149,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     if (!event.isDirect) {
       // Phase 1 requirement: DM only.
       log?.info?.(
-        `naverworks[${account.accountId}]: ignored non-direct event from ${event.userId}`,
+        `naverworks[${account.accountId}]: ignored non-direct event from ${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""}`,
       );
       respondJson(res, 200, { ok: true, ignored: "non-direct" });
       return;
@@ -164,7 +164,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     if (account.dmPolicy === "allowlist" && account.allowFrom.length > 0) {
       if (!account.allowFrom.includes(event.userId)) {
         log?.warn?.(
-          `naverworks[${account.accountId}]: sender blocked by allowlist (${event.userId})`,
+          `naverworks[${account.accountId}]: sender blocked by allowlist (${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""})`,
         );
         respondJson(res, 403, { error: "Sender not in allowlist" });
         return;
@@ -172,7 +172,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     }
 
     log?.info?.(
-      `naverworks[${account.accountId}]: accepted direct event from ${event.userId}; scheduling async delivery`,
+      `naverworks[${account.accountId}]: accepted direct event from ${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""}; scheduling async delivery`,
     );
     respondJson(res, 200, { ok: true });
 
