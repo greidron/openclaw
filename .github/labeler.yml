@@ -56,6 +56,11 @@
       - any-glob-to-any-file:
           - "extensions/nextcloud-talk/**"
           - "docs/channels/nextcloud-talk.md"
+"channel: naverworks":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/naverworks/**"
+          - "docs/channels/naverworks.md"
 "channel: nostr":
   - changed-files:
       - any-glob-to-any-file:
