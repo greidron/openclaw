@@ -95,6 +95,9 @@ export function createNaverWorksPlugin() {
           account,
           log,
           deliver: async (event) => {
+            log?.info?.(
+              `naverworks[${account.accountId}]: processing inbound event userId=${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""}`,
+            );
             const runtime = getNaverWorksRuntime();
             const freshCfg = await runtime.config.loadConfig();
             const route = runtime.channel.routing.resolveAgentRoute({
@@ -104,6 +107,9 @@ export function createNaverWorksPlugin() {
               teamId: event.teamId,
               peer: { kind: "direct", id: event.userId },
             });
+            log?.info?.(
+              `naverworks[${account.accountId}]: route resolved agentId=${route.agentId} matchedBy=${route.matchedBy} sessionKey=${route.sessionKey}`,
+            );
 
             if (account.strictBinding && route.matchedBy === "default") {
               log?.warn?.(
@@ -146,6 +152,9 @@ export function createNaverWorksPlugin() {
                 },
               },
             });
+            log?.info?.(
+              `naverworks[${account.accountId}]: inbound event handled for ${event.userId} (agent=${route.agentId})`,
+            );
           },
         });
 

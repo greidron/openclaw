@@ -171,6 +171,9 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
       }
     }
 
+    log?.info?.(
+      `naverworks[${account.accountId}]: accepted direct event from ${event.userId}; scheduling async delivery`,
+    );
     respondJson(res, 200, { ok: true });
 
     try {
