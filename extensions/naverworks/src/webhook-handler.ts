@@ -25,9 +25,15 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function asString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    const converted = String(value).trim();
+    return converted || undefined;
+  }
+  return undefined;
 }
 
 function pickFirstString(candidates: unknown[]): string | undefined {
@@ -104,14 +110,6 @@ export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent 
   };
 }
 
-function previewPayload(payload: string, maxLen = 1000): string {
-  const compact = payload.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxLen) {
-    return compact;
-  }
-  return `${compact.slice(0, maxLen)}...`;
-}
-
 function respondJson(res: ServerResponse, statusCode: number, payload: Record<string, unknown>) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
@@ -147,22 +145,12 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
       return;
     }
 
-    log?.info?.(
-      `naverworks[${account.accountId}]: webhook payload bytes=${rawBody.length} preview=${previewPayload(rawBody)}`,
-    );
-
     const event = parseNaverWorksInbound(rawBody);
     if (!event) {
-      log?.warn?.(
-        `naverworks[${account.accountId}]: invalid webhook payload preview=${previewPayload(rawBody)}`,
-      );
+      log?.warn?.(`naverworks[${account.accountId}]: invalid webhook payload`);
       respondJson(res, 400, { error: "Invalid NAVER WORKS event payload" });
       return;
     }
-
-    log?.info?.(
-      `naverworks[${account.accountId}]: parsed event userId=${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""} isDirect=${event.isDirect}`,
-    );
 
     if (!event.isDirect) {
       // Phase 1 requirement: DM only.

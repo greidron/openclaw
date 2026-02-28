@@ -27,6 +27,16 @@ describe("parseNaverWorksInbound", () => {
     );
   });
 
+  it("parses numeric domainId as teamId string", () => {
+    const payload = JSON.stringify({
+      source: { userId: "u2", domainId: 12345 },
+      content: { text: "hello" },
+    });
+
+    const parsed = parseNaverWorksInbound(payload);
+    expect(parsed?.teamId).toBe("12345");
+  });
+
   it("marks non-direct events so phase1 can ignore them", () => {
     const payload = JSON.stringify({
       source: { userId: "u1", domainId: "ws1" },
