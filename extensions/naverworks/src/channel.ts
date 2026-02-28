@@ -71,14 +71,22 @@ export function createNaverWorksPlugin() {
     gateway: {
       startAccount: async (ctx: any) => {
         const { cfg, accountId, log } = ctx;
+        log?.info?.(`naverworks[${accountId ?? DEFAULT_ACCOUNT_ID}]: start requested`);
         const account = resolveAccount(cfg, accountId);
+        log?.info?.(
+          `naverworks[${account.accountId}]: resolved config (enabled=${account.enabled}, webhookPath=${account.webhookPath}, dmPolicy=${account.dmPolicy}, strictBinding=${account.strictBinding})`,
+        );
         if (!account.enabled) {
+          log?.info?.(`naverworks[${account.accountId}]: disabled; skipping start`);
           return { stop: () => {} };
         }
 
         const routeKey = `${account.accountId}:${account.webhookPath}`;
         const prev = activeRouteUnregisters.get(routeKey);
         if (prev) {
+          log?.info?.(
+            `naverworks[${account.accountId}]: replacing existing webhook route ${account.webhookPath}`,
+          );
           prev();
           activeRouteUnregisters.delete(routeKey);
         }
@@ -148,10 +156,16 @@ export function createNaverWorksPlugin() {
           log: (line: string) => log?.info?.(line),
           handler,
         });
+        log?.info?.(
+          `naverworks[${account.accountId}]: webhook route registered at ${account.webhookPath}`,
+        );
         activeRouteUnregisters.set(routeKey, unregister);
 
         return {
           stop: () => {
+            log?.info?.(
+              `naverworks[${account.accountId}]: stop requested; unregistering webhook route`,
+            );
             unregister();
             activeRouteUnregisters.delete(routeKey);
           },

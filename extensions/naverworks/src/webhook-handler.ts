@@ -122,6 +122,9 @@ export type NaverWorksWebhookDeps = {
 export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
   const { account, deliver, log } = deps;
   return async (req: IncomingMessage, res: ServerResponse) => {
+    log?.info?.(
+      `naverworks[${account.accountId}]: webhook request received (${req.method ?? "UNKNOWN"})`,
+    );
     if (req.method !== "POST") {
       respondJson(res, 405, { error: "Method not allowed" });
       return;
@@ -138,23 +141,31 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
 
     const event = parseNaverWorksInbound(rawBody);
     if (!event) {
+      log?.warn?.(`naverworks[${account.accountId}]: invalid webhook payload`);
       respondJson(res, 400, { error: "Invalid NAVER WORKS event payload" });
       return;
     }
 
     if (!event.isDirect) {
       // Phase 1 requirement: DM only.
+      log?.info?.(
+        `naverworks[${account.accountId}]: ignored non-direct event from ${event.userId}`,
+      );
       respondJson(res, 200, { ok: true, ignored: "non-direct" });
       return;
     }
 
     if (account.dmPolicy === "disabled") {
+      log?.warn?.(`naverworks[${account.accountId}]: DM blocked by dmPolicy=disabled`);
       respondJson(res, 403, { error: "DM disabled" });
       return;
     }
 
     if (account.dmPolicy === "allowlist" && account.allowFrom.length > 0) {
       if (!account.allowFrom.includes(event.userId)) {
+        log?.warn?.(
+          `naverworks[${account.accountId}]: sender blocked by allowlist (${event.userId})`,
+        );
         respondJson(res, 403, { error: "Sender not in allowlist" });
         return;
       }
