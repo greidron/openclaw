@@ -161,15 +161,22 @@ export function createNaverWorksPlugin() {
         );
         activeRouteUnregisters.set(routeKey, unregister);
 
-        return {
-          stop: () => {
-            log?.info?.(
-              `naverworks[${account.accountId}]: stop requested; unregistering webhook route`,
-            );
-            unregister();
-            activeRouteUnregisters.delete(routeKey);
-          },
-        };
+        try {
+          // Webhook mode is passive; keep account task alive until the runtime aborts it.
+          await new Promise<void>((resolve) => {
+            if (ctx.abortSignal.aborted) {
+              resolve();
+              return;
+            }
+            ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        } finally {
+          log?.info?.(
+            `naverworks[${account.accountId}]: abort received; unregistering webhook route`,
+          );
+          unregister();
+          activeRouteUnregisters.delete(routeKey);
+        }
       },
       stopAccount: async () => {},
     },
