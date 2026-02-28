@@ -35,6 +35,7 @@ openclaw plugins install ./extensions/naverworks
       webhookPath: "/naverworks/events",
       dmPolicy: "allowlist",
       allowFrom: ["user-U123", "user-U456"],
+      strictBinding: true, // default: true (drop messages without a matching binding)
     },
   },
   bindings: [
@@ -53,4 +54,6 @@ openclaw plugins install ./extensions/naverworks
 ## Notes
 
 - Non-direct events are ignored in phase 1 by design.
+- `strictBinding` defaults to `true`. When no binding matches, the plugin drops the event instead of falling back to the default agent.
+- Set `strictBinding: false` if you want default-agent fallback behavior for unmatched DMs.
 - Outbound delivery API integration is planned for the next phase.

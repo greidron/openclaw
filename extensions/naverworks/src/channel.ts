@@ -18,6 +18,7 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       allowFrom: z.array(z.string()).optional(),
       webhookPath: z.string().optional(),
       botName: z.string().optional(),
+      strictBinding: z.boolean().optional(),
     })
     .passthrough(),
 );
@@ -95,6 +96,13 @@ export function createNaverWorksPlugin() {
               teamId: event.teamId,
               peer: { kind: "direct", id: event.userId },
             });
+
+            if (account.strictBinding && route.matchedBy === "default") {
+              log?.warn?.(
+                `naverworks: strictBinding dropped event for ${event.userId} (no matching binding)`,
+              );
+              return;
+            }
 
             const msgCtx = {
               Body: event.text,

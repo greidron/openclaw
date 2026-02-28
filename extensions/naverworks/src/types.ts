@@ -5,6 +5,7 @@ export type NaverWorksAccount = {
   dmPolicy: "open" | "pairing" | "allowlist" | "disabled";
   allowFrom: string[];
   botName: string;
+  strictBinding: boolean;
 };
 
 export type NaverWorksInboundEvent = {

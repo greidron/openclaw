@@ -48,5 +48,9 @@ export function resolveAccount(
     dmPolicy,
     allowFrom: [...asStringList(section.allowFrom), ...asStringList(accountCfg.allowFrom)],
     botName: asString(accountCfg.botName) ?? asString(section.botName) ?? "NAVER WORKS Bot",
+    strictBinding:
+      (accountCfg.strictBinding as boolean | undefined) ??
+      (section.strictBinding as boolean | undefined) ??
+      true,
   };
 }
