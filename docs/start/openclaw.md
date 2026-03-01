@@ -84,6 +84,8 @@ Memory workflow: [Memory](/concepts/memory)
 
 Optional: choose a different workspace with `agents.defaults.workspace` (supports `~`).
 
+If you want bootstrap files (`AGENTS.md`, `USER.md`, etc.) to come from a custom template directory, set `OPENCLAW_WORKSPACE_TEMPLATE_DIR` to a folder containing the template filenames.
+
 ```json5
 {
   agent: {

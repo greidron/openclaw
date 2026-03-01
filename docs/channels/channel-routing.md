@@ -93,6 +93,48 @@ Example:
 }
 ```
 
+## Draft pattern: NAVER WORKS DM per-user agent routing
+
+If you build a NAVER WORKS channel/plugin and want one isolated agent workspace
+per DM user, bind by `peer` and optionally `teamId` (workspace/tenant id):
+
+```json5
+{
+  agents: {
+    list: [
+      {
+        id: "nw-main",
+        workspace: "~/.openclaw/workspace-nw-main",
+      },
+      {
+        id: "nw-wsA-userU123",
+        workspace: "~/.openclaw/workspace-nw-wsA-userU123",
+      },
+    ],
+  },
+  bindings: [
+    {
+      agentId: "nw-wsA-userU123",
+      match: {
+        channel: "naverworks",
+        teamId: "workspace-A",
+        peer: { kind: "direct", id: "user-U123" },
+      },
+    },
+    {
+      agentId: "nw-main",
+      match: { channel: "naverworks", teamId: "workspace-A", accountId: "*" },
+    },
+  ],
+}
+```
+
+Notes:
+
+- This pattern is best for DM-first launches.
+- Group chats can be excluded initially by dropping non-direct events in the
+  channel plugin until group policy and mention gating are designed.
+
 ## Session storage
 
 Session stores live under the state directory (default `~/.openclaw`):
