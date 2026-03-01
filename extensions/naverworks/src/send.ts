@@ -8,6 +8,16 @@ type OAuthTokenCacheEntry = {
 
 const oauthTokenCache = new Map<string, OAuthTokenCacheEntry>();
 
+function getOauthTokenCacheKey(account: NaverWorksAccount): string | null {
+  const clientId = account.clientId?.trim();
+  const serviceAccount = account.serviceAccount?.trim();
+  if (!clientId || !serviceAccount) {
+    return null;
+  }
+  const scope = account.scope?.trim() || "bot";
+  return [account.accountId, clientId, serviceAccount, scope].join("::");
+}
+
 function trimTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
@@ -59,7 +69,10 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<stri
   }
 
   const scope = account.scope?.trim() || "bot";
-  const cacheKey = [account.accountId, clientId, serviceAccount, scope].join("::");
+  const cacheKey = getOauthTokenCacheKey(account);
+  if (!cacheKey) {
+    return null;
+  }
   const cached = oauthTokenCache.get(cacheKey);
   if (cached && cached.expiresAtMs > Date.now() + 60_000) {
     return cached.token;
@@ -113,6 +126,24 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<stri
   return accessToken;
 }
 
+async function postUserMessage(params: {
+  account: NaverWorksAccount;
+  toUserId: string;
+  text: string;
+  accessToken: string;
+}): Promise<Response> {
+  const { account, toUserId, text, accessToken } = params;
+  const url = buildSendUrl(account, toUserId);
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ content: { type: "text", text } }),
+  });
+}
+
 export async function sendMessageNaverWorks(params: {
   account: NaverWorksAccount;
   toUserId: string;
@@ -131,25 +162,34 @@ export async function sendMessageNaverWorks(params: {
     return { ok: false, reason: "not-configured" };
   }
 
+  const usesStaticAccessToken = Boolean(account.accessToken);
   const accessToken = account.accessToken ?? (await issueAccessTokenWithJwt(account));
   if (!accessToken) {
     return { ok: false, reason: "auth-error" };
   }
 
-  const url = buildSendUrl(account, toUserId);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ content: { type: "text", text } }),
-  });
+  let response = await postUserMessage({ account, toUserId, text, accessToken });
+
+  if (!usesStaticAccessToken && (response.status === 401 || response.status === 403)) {
+    const cacheKey = getOauthTokenCacheKey(account);
+    if (cacheKey) {
+      oauthTokenCache.delete(cacheKey);
+    }
+    const refreshedToken = await issueAccessTokenWithJwt(account);
+    if (!refreshedToken) {
+      const body = await response.text().catch(() => "");
+      return { ok: false, reason: "auth-error", status: response.status, body };
+    }
+    response = await postUserMessage({ account, toUserId, text, accessToken: refreshedToken });
+  }
 
   if (response.ok) {
     return { ok: true };
   }
 
   const body = await response.text().catch(() => "");
+  if (response.status === 401 || response.status === 403) {
+    return { ok: false, reason: "auth-error", status: response.status, body };
+  }
   return { ok: false, reason: "http-error", status: response.status, body };
 }
