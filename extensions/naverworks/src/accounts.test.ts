@@ -49,5 +49,29 @@ describe("resolveAccount", () => {
     expect(account.botId).toBe("acc-bot");
     expect(account.accessToken).toBe("acc-token");
     expect(account.apiBaseUrl).toBe("https://www.worksapis.com/v1.0");
+    expect(account.tokenUrl).toBe("https://auth.worksmobile.com/oauth2/v2.0/token");
+  });
+
+  it("supports JWT auth settings", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            clientId: "client-id",
+            serviceAccount: "serviceaccount@example.com",
+            privateKey: "line1\\nline2",
+            scope: "bot user.read",
+            jwtIssuer: "issuer-id",
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.clientId).toBe("client-id");
+    expect(account.serviceAccount).toBe("serviceaccount@example.com");
+    expect(account.privateKey).toBe("line1\nline2");
+    expect(account.scope).toBe("bot user.read");
+    expect(account.jwtIssuer).toBe("issuer-id");
   });
 });

@@ -12,7 +12,7 @@ Current phase focuses on:
 - webhook intake for NAVER WORKS events
 - DM-only handling (non-direct events are ignored)
 - deterministic agent routing by `peer` and optional `teamId`
-- outbound text delivery to NAVER WORKS DM when `botId` + `accessToken` are configured
+- outbound text delivery to NAVER WORKS DM with static token or JWT-based service-account auth
 
 ## Install
 
@@ -38,7 +38,18 @@ openclaw plugins install ./extensions/naverworks
       allowFrom: ["user-U123", "user-U456"],
       strictBinding: true, // default: true (drop messages without a matching binding)
       botId: "your-bot-id",
+
+      // Option A) static token (manual management)
       accessToken: "xoxb-your-worksmobile-token",
+
+      // Option B) JWT service-account auth (recommended)
+      clientId: "your-client-id",
+      serviceAccount: "serviceaccount@example.com",
+      privateKey: "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
+      scope: "bot", // optional (default: bot)
+      tokenUrl: "https://auth.worksmobile.com/oauth2/v2.0/token", // optional
+      jwtIssuer: "your-jwt-issuer", // optional (default: clientId)
+
       apiBaseUrl: "https://www.worksapis.com/v1.0", // optional
     },
   },
@@ -63,4 +74,5 @@ openclaw plugins install ./extensions/naverworks
 - `teamId` matching uses the event payload value from `source.teamId`, `source.domainId`, `source.tenantId`, `teamId`, `domainId`, or `tenantId` (first non-empty value wins).
 - To discover the exact `teamId` value for bindings, check gateway logs for lines like `processing inbound event userId=... teamId=...` or `strictBinding dropped event ... teamId=...`, then copy that value into `bindings[].match.teamId`.
 - Outbound send endpoint defaults to `https://www.worksapis.com/v1.0/bots/{botId}/users/{userId}/messages`. Override `apiBaseUrl` only if your environment needs a different base URL.
-- If `botId` or `accessToken` is missing, inbound still works but outbound replies are skipped with a warning log.
+- Auth options for outbound: static `accessToken`, or JWT (`clientId` + `serviceAccount` + `privateKey`).
+- If outbound auth is not configured, inbound still works but replies are skipped or auth-failed logs are emitted.

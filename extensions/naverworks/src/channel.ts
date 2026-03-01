@@ -22,6 +22,12 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       strictBinding: z.boolean().optional(),
       botId: z.string().optional(),
       accessToken: z.string().optional(),
+      clientId: z.string().optional(),
+      serviceAccount: z.string().optional(),
+      privateKey: z.string().optional(),
+      scope: z.string().optional(),
+      tokenUrl: z.string().optional(),
+      jwtIssuer: z.string().optional(),
       apiBaseUrl: z.string().optional(),
     })
     .passthrough(),
@@ -162,7 +168,13 @@ export function createNaverWorksPlugin() {
                   if (!sent.ok) {
                     if (sent.reason === "not-configured") {
                       log?.warn?.(
-                        `naverworks[${account.accountId}]: outbound skipped (set botId/accessToken to enable delivery)`,
+                        `naverworks[${account.accountId}]: outbound skipped (set botId and auth settings to enable delivery)`,
+                      );
+                      return;
+                    }
+                    if (sent.reason === "auth-error") {
+                      log?.error?.(
+                        `naverworks[${account.accountId}]: outbound auth failed (check accessToken or JWT auth settings)`,
                       );
                       return;
                     }

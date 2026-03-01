@@ -8,6 +8,12 @@ export type NaverWorksAccount = {
   strictBinding: boolean;
   botId?: string;
   accessToken?: string;
+  clientId?: string;
+  serviceAccount?: string;
+  privateKey?: string;
+  scope?: string;
+  tokenUrl: string;
+  jwtIssuer?: string;
   apiBaseUrl: string;
 };
 

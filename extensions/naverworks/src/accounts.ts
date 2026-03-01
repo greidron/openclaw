@@ -14,6 +14,13 @@ function asStringList(value: unknown): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function normalizePrivateKey(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.replace(/\\n/g, "\n");
+}
+
 export function listAccountIds(cfg: Record<string, unknown>): string[] {
   const section = ((cfg as any)?.channels?.naverworks ?? {}) as Record<string, unknown>;
   const accounts = (section.accounts ?? {}) as Record<string, unknown>;
@@ -54,6 +61,18 @@ export function resolveAccount(
       true,
     botId: asString(accountCfg.botId) ?? asString(section.botId),
     accessToken: asString(accountCfg.accessToken) ?? asString(section.accessToken),
+    clientId: asString(accountCfg.clientId) ?? asString(section.clientId),
+    serviceAccount: asString(accountCfg.serviceAccount) ?? asString(section.serviceAccount),
+    privateKey: normalizePrivateKey(
+      asString(accountCfg.privateKey) ?? asString(section.privateKey),
+    ),
+    scope: asString(accountCfg.scope) ?? asString(section.scope) ?? "bot",
+    tokenUrl:
+      asString(accountCfg.tokenUrl) ??
+      asString(section.tokenUrl) ??
+      "https://auth.worksmobile.com/oauth2/v2.0/token",
+    jwtIssuer:
+      asString(accountCfg.jwtIssuer) ?? asString(section.jwtIssuer) ?? asString(section.clientId),
     apiBaseUrl:
       asString(accountCfg.apiBaseUrl) ??
       asString(section.apiBaseUrl) ??
