@@ -1,5 +1,6 @@
+import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseNaverWorksInbound } from "./webhook-handler.js";
+import { parseNaverWorksInbound, verifyNaverWorksSignature } from "./webhook-handler.js";
 
 describe("parseNaverWorksInbound", () => {
   it("parses direct message payload with team + user ids", () => {
@@ -46,5 +47,41 @@ describe("parseNaverWorksInbound", () => {
 
     const parsed = parseNaverWorksInbound(payload);
     expect(parsed?.isDirect).toBe(false);
+  });
+});
+
+describe("verifyNaverWorksSignature", () => {
+  it("matches signature generated with HMAC-SHA256 + base64", () => {
+    const body = JSON.stringify({ source: { userId: "u1" }, content: { text: "hello" } });
+    const signature = crypto
+      .createHmac("sha256", "bot-secret")
+      .update(body, "utf-8")
+      .digest("base64");
+
+    expect(
+      verifyNaverWorksSignature({
+        body,
+        botSecret: "bot-secret",
+        headerSignature: signature,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false for missing or mismatched signatures", () => {
+    const body = JSON.stringify({ source: { userId: "u1" }, content: { text: "hello" } });
+
+    expect(
+      verifyNaverWorksSignature({
+        body,
+        botSecret: "bot-secret",
+      }),
+    ).toBe(false);
+    expect(
+      verifyNaverWorksSignature({
+        body,
+        botSecret: "bot-secret",
+        headerSignature: "invalid-signature",
+      }),
+    ).toBe(false);
   });
 });

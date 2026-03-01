@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { NaverWorksAccount, NaverWorksInboundEvent } from "./types.js";
 
@@ -42,6 +43,52 @@ function pickFirstString(candidates: unknown[]): string | undefined {
     if (value) return value;
   }
   return undefined;
+}
+
+function readSignatureHeader(req: IncomingMessage): string | undefined {
+  const raw = req.headers["x-works-signature"];
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      const normalized = asString(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return undefined;
+  }
+  return asString(raw);
+}
+
+function buildExpectedSignature(params: { body: string; botSecret: string }): string {
+  return crypto
+    .createHmac("sha256", params.botSecret)
+    .update(params.body, "utf-8")
+    .digest("base64");
+}
+
+function signaturesEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, "utf-8");
+  const rightBytes = Buffer.from(right, "utf-8");
+  if (leftBytes.length !== rightBytes.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(leftBytes, rightBytes);
+}
+
+export function verifyNaverWorksSignature(params: {
+  body: string;
+  botSecret: string;
+  headerSignature?: string;
+}): boolean {
+  const normalizedHeader = asString(params.headerSignature);
+  if (!normalizedHeader) {
+    return false;
+  }
+  const expectedSignature = buildExpectedSignature({
+    body: params.body,
+    botSecret: params.botSecret,
+  });
+  return signaturesEqual(normalizedHeader, expectedSignature);
 }
 
 export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent | null {
@@ -143,6 +190,17 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
       log?.error?.("naverworks: failed reading request body", error);
       respondJson(res, 400, { error: "Invalid body" });
       return;
+    }
+
+    if (account.botSecret) {
+      const headerSignature = readSignatureHeader(req);
+      if (
+        !verifyNaverWorksSignature({ body: rawBody, botSecret: account.botSecret, headerSignature })
+      ) {
+        log?.warn?.(`naverworks[${account.accountId}]: webhook signature verification failed`);
+        respondJson(res, 401, { error: "Invalid signature" });
+        return;
+      }
     }
 
     const event = parseNaverWorksInbound(rawBody);

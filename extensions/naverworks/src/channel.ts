@@ -20,6 +20,7 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       webhookPath: z.string().optional(),
       botName: z.string().optional(),
       strictBinding: z.boolean().optional(),
+      botSecret: z.string().optional(),
       botId: z.string().optional(),
       accessToken: z.string().optional(),
       clientId: z.string().optional(),

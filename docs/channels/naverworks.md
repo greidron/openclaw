@@ -37,6 +37,7 @@ openclaw plugins install ./extensions/naverworks
       dmPolicy: "allowlist",
       allowFrom: ["user-U123", "user-U456"],
       strictBinding: true, // default: true (drop messages without a matching binding)
+      botSecret: "your-bot-secret", // optional but strongly recommended for webhook signature verification
       botId: "your-bot-id",
 
       // Option A) static token (manual management)
@@ -74,5 +75,6 @@ openclaw plugins install ./extensions/naverworks
 - `teamId` matching uses the event payload value from `source.teamId`, `source.domainId`, `source.tenantId`, `teamId`, `domainId`, or `tenantId` (first non-empty value wins).
 - To discover the exact `teamId` value for bindings, check gateway logs for lines like `processing inbound event userId=... teamId=...` or `strictBinding dropped event ... teamId=...`, then copy that value into `bindings[].match.teamId`.
 - Outbound send endpoint defaults to `https://www.worksapis.com/v1.0/bots/{botId}/users/{userId}/messages`. Override `apiBaseUrl` only if your environment needs a different base URL.
+- Webhook auth: if `botSecret` is set, OpenClaw verifies `X-WORKS-Signature` using HMAC-SHA256 over the raw request body (per NAVER WORKS callback docs).
 - Auth options for outbound: static `accessToken`, or JWT (`clientId` + `serviceAccount` + `privateKey`).
 - If outbound auth is not configured, inbound still works but replies are skipped or auth-failed logs are emitted.

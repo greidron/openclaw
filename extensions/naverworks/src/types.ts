@@ -6,6 +6,7 @@ export type NaverWorksAccount = {
   allowFrom: string[];
   botName: string;
   strictBinding: boolean;
+  botSecret?: string;
   botId?: string;
   accessToken?: string;
   clientId?: string;

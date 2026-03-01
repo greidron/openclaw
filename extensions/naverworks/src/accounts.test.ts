@@ -74,4 +74,23 @@ describe("resolveAccount", () => {
     expect(account.scope).toBe("bot user.read");
     expect(account.jwtIssuer).toBe("issuer-id");
   });
+  it("resolves botSecret from account-level config", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            botSecret: "top-secret",
+            accounts: {
+              default: {
+                botSecret: "acc-secret",
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.botSecret).toBe("acc-secret");
+  });
 });

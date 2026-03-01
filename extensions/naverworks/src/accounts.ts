@@ -59,6 +59,7 @@ export function resolveAccount(
       (accountCfg.strictBinding as boolean | undefined) ??
       (section.strictBinding as boolean | undefined) ??
       true,
+    botSecret: asString(accountCfg.botSecret) ?? asString(section.botSecret),
     botId: asString(accountCfg.botId) ?? asString(section.botId),
     accessToken: asString(accountCfg.accessToken) ?? asString(section.accessToken),
     clientId: asString(accountCfg.clientId) ?? asString(section.clientId),
