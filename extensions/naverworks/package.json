@@ -1,0 +1,28 @@
+{
+  "name": "@openclaw/naverworks",
+  "version": "2026.2.26",
+  "description": "NAVER WORKS channel plugin for OpenClaw",
+  "type": "module",
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "naverworks",
+      "label": "NAVER WORKS",
+      "selectionLabel": "NAVER WORKS (Webhook)",
+      "docsPath": "/channels/naverworks",
+      "docsLabel": "naverworks",
+      "blurb": "Connect NAVER WORKS bot webhooks with DM-first agent routing.",
+      "order": 92
+    },
+    "install": {
+      "npmSpec": "@openclaw/naverworks",
+      "localPath": "extensions/naverworks",
+      "defaultChoice": "npm"
+    }
+  }
+}
