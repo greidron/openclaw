@@ -71,4 +71,30 @@ describe("resolveWorkspaceTemplateDir", () => {
     });
     expect(resolved).toBe(customTemplatesDir);
   });
+  it("uses OPENCLAW_WORKSPACE_TEMPLATE_DIR even after a fallback path is cached", async () => {
+    const root = await makeTempRoot();
+    await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "openclaw" }));
+
+    const defaultTemplatesDir = path.join(root, "docs", "reference", "templates");
+    await fs.mkdir(defaultTemplatesDir, { recursive: true });
+    await fs.writeFile(path.join(defaultTemplatesDir, "AGENTS.md"), "# default\n");
+
+    const customTemplatesDir = path.join(root, "custom-templates");
+    await fs.mkdir(customTemplatesDir, { recursive: true });
+    await fs.writeFile(path.join(customTemplatesDir, "AGENTS.md"), "# custom\n");
+
+    const distDir = path.join(root, "dist");
+    await fs.mkdir(distDir, { recursive: true });
+    const moduleUrl = pathToFileURL(path.join(distDir, "model-selection.mjs")).toString();
+
+    const cachedResolved = await resolveWorkspaceTemplateDir({ cwd: distDir, moduleUrl });
+    expect(cachedResolved).toBe(defaultTemplatesDir);
+
+    const resolved = await resolveWorkspaceTemplateDir({
+      cwd: distDir,
+      moduleUrl,
+      env: { OPENCLAW_WORKSPACE_TEMPLATE_DIR: "../custom-templates" },
+    });
+    expect(resolved).toBe(customTemplatesDir);
+  });
 });

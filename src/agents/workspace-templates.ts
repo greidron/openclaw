@@ -17,6 +17,18 @@ export async function resolveWorkspaceTemplateDir(opts?: {
   moduleUrl?: string;
   env?: NodeJS.ProcessEnv;
 }): Promise<string> {
+  const cwd = opts?.cwd ?? process.cwd();
+  const env = opts?.env ?? process.env;
+  const configuredTemplateDir = env.OPENCLAW_WORKSPACE_TEMPLATE_DIR?.trim();
+
+  if (configuredTemplateDir) {
+    const resolvedConfiguredDir = path.resolve(cwd, configuredTemplateDir);
+    if (await pathExists(resolvedConfiguredDir)) {
+      cachedTemplateDir = resolvedConfiguredDir;
+      return resolvedConfiguredDir;
+    }
+  }
+
   if (cachedTemplateDir) {
     return cachedTemplateDir;
   }
@@ -27,17 +39,6 @@ export async function resolveWorkspaceTemplateDir(opts?: {
   resolvingTemplateDir = (async () => {
     const moduleUrl = opts?.moduleUrl ?? import.meta.url;
     const argv1 = opts?.argv1 ?? process.argv[1];
-    const cwd = opts?.cwd ?? process.cwd();
-    const env = opts?.env ?? process.env;
-    const configuredTemplateDir = env.OPENCLAW_WORKSPACE_TEMPLATE_DIR?.trim();
-
-    if (configuredTemplateDir) {
-      const resolvedConfiguredDir = path.resolve(cwd, configuredTemplateDir);
-      if (await pathExists(resolvedConfiguredDir)) {
-        cachedTemplateDir = resolvedConfiguredDir;
-        return resolvedConfiguredDir;
-      }
-    }
 
     const packageRoot = await resolveOpenClawPackageRoot({ moduleUrl, argv1, cwd });
     const candidates = [
