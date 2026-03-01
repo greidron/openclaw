@@ -85,6 +85,7 @@ describe("sendMessageNaverWorks", () => {
         strictBinding: true,
         botId: "bot-1",
         clientId: "client-retry-2",
+        clientSecret: "secret-retry-2",
         serviceAccount: "svc-retry-2@example.com",
         privateKey: generatedPrivateKey,
         scope: "bot",
@@ -100,8 +101,15 @@ describe("sendMessageNaverWorks", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "https://auth.worksmobile.com/oauth2/v2.0/token",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.objectContaining({
+          toString: expect.any(Function),
+        }),
+      }),
     );
+    const firstTokenCall = fetchMock.mock.calls[0]?.[1] as { body?: URLSearchParams } | undefined;
+    expect(firstTokenCall?.body?.toString()).toContain("client_secret=secret-retry-2");
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "https://www.worksapis.com/v1.0/bots/bot-1/users/user-1/messages",
@@ -144,6 +152,7 @@ describe("sendMessageNaverWorks", () => {
         strictBinding: true,
         botId: "bot-1",
         clientId: "client-retry",
+        clientSecret: "secret-retry",
         serviceAccount: "svc-retry@example.com",
         privateKey: generatedPrivateKey,
         scope: "bot",
@@ -192,6 +201,7 @@ describe("sendMessageNaverWorks", () => {
         strictBinding: true,
         botId: "bot-1",
         clientId: "client-auth-fail",
+        clientSecret: "secret-auth-fail",
         serviceAccount: "svc-auth-fail@example.com",
         privateKey: generatedPrivateKey,
         scope: "bot",

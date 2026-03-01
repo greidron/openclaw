@@ -63,6 +63,7 @@ export function resolveAccount(
     botId: asString(accountCfg.botId) ?? asString(section.botId),
     accessToken: asString(accountCfg.accessToken) ?? asString(section.accessToken),
     clientId: asString(accountCfg.clientId) ?? asString(section.clientId),
+    clientSecret: asString(accountCfg.clientSecret) ?? asString(section.clientSecret),
     serviceAccount: asString(accountCfg.serviceAccount) ?? asString(section.serviceAccount),
     privateKey: normalizePrivateKey(
       asString(accountCfg.privateKey) ?? asString(section.privateKey),

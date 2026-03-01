@@ -10,6 +10,7 @@ export type NaverWorksAccount = {
   botId?: string;
   accessToken?: string;
   clientId?: string;
+  clientSecret?: string;
   serviceAccount?: string;
   privateKey?: string;
   scope?: string;

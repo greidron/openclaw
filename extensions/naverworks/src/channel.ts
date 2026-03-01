@@ -24,6 +24,7 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       botId: z.string().optional(),
       accessToken: z.string().optional(),
       clientId: z.string().optional(),
+      clientSecret: z.string().optional(),
       serviceAccount: z.string().optional(),
       privateKey: z.string().optional(),
       scope: z.string().optional(),

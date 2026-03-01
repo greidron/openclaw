@@ -45,6 +45,7 @@ openclaw plugins install ./extensions/naverworks
 
       // Option B) JWT service-account auth (recommended)
       clientId: "your-client-id",
+      clientSecret: "your-client-secret",
       serviceAccount: "serviceaccount@example.com",
       privateKey: "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
       scope: "bot", // optional (default: bot)
@@ -76,5 +77,5 @@ openclaw plugins install ./extensions/naverworks
 - To discover the exact `teamId` value for bindings, check gateway logs for lines like `processing inbound event userId=... teamId=...` or `strictBinding dropped event ... teamId=...`, then copy that value into `bindings[].match.teamId`.
 - Outbound send endpoint defaults to `https://www.worksapis.com/v1.0/bots/{botId}/users/{userId}/messages`. Override `apiBaseUrl` only if your environment needs a different base URL.
 - Webhook auth: if `botSecret` is set, OpenClaw verifies `X-WORKS-Signature` using HMAC-SHA256 over the raw request body (per NAVER WORKS callback docs).
-- Auth options for outbound: static `accessToken`, or JWT (`clientId` + `serviceAccount` + `privateKey`).
+- Auth options for outbound: static `accessToken`, or JWT (`clientId` + `clientSecret` + `serviceAccount` + `privateKey`).
 - If outbound auth is not configured, inbound still works but replies are skipped or auth-failed logs are emitted.

@@ -15,7 +15,13 @@ function getOauthTokenCacheKey(account: NaverWorksAccount): string | null {
     return null;
   }
   const scope = account.scope?.trim() || "bot";
-  return [account.accountId, clientId, serviceAccount, scope].join("::");
+  return [
+    account.accountId,
+    clientId,
+    account.clientSecret?.trim() || "",
+    serviceAccount,
+    scope,
+  ].join("::");
 }
 
 function trimTrailingSlash(value: string): string {
@@ -65,10 +71,11 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<{
   body?: string;
 }> {
   const clientId = account.clientId?.trim();
+  const clientSecret = account.clientSecret?.trim();
   const serviceAccount = account.serviceAccount?.trim();
   const privateKey = account.privateKey;
   const issuer = account.jwtIssuer?.trim() || clientId;
-  if (!clientId || !serviceAccount || !privateKey || !issuer) {
+  if (!clientId || !clientSecret || !serviceAccount || !privateKey || !issuer) {
     return {};
   }
 
@@ -93,6 +100,7 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<{
     assertion,
     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
     client_id: clientId,
+    client_secret: clientSecret,
     scope,
   });
 

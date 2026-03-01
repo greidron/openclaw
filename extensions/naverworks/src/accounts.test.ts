@@ -58,6 +58,7 @@ describe("resolveAccount", () => {
         channels: {
           naverworks: {
             clientId: "client-id",
+            clientSecret: "client-secret",
             serviceAccount: "serviceaccount@example.com",
             privateKey: "line1\\nline2",
             scope: "bot user.read",
@@ -69,6 +70,7 @@ describe("resolveAccount", () => {
     );
 
     expect(account.clientId).toBe("client-id");
+    expect(account.clientSecret).toBe("client-secret");
     expect(account.serviceAccount).toBe("serviceaccount@example.com");
     expect(account.privateKey).toBe("line1\nline2");
     expect(account.scope).toBe("bot user.read");
