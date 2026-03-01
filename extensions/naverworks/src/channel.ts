@@ -175,7 +175,7 @@ export function createNaverWorksPlugin() {
                     }
                     if (sent.reason === "auth-error") {
                       log?.error?.(
-                        `naverworks[${account.accountId}]: outbound auth failed (check accessToken or JWT auth settings)`,
+                        `naverworks[${account.accountId}]: outbound auth failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""} (check accessToken or JWT auth settings)`,
                       );
                       return;
                     }

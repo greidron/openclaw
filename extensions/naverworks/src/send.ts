@@ -59,23 +59,27 @@ function buildJwtAssertion(params: {
   return `${unsignedToken}.${base64UrlEncode(signature)}`;
 }
 
-async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<string | null> {
+async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<{
+  token?: string;
+  status?: number;
+  body?: string;
+}> {
   const clientId = account.clientId?.trim();
   const serviceAccount = account.serviceAccount?.trim();
   const privateKey = account.privateKey;
   const issuer = account.jwtIssuer?.trim() || clientId;
   if (!clientId || !serviceAccount || !privateKey || !issuer) {
-    return null;
+    return {};
   }
 
   const scope = account.scope?.trim() || "bot";
   const cacheKey = getOauthTokenCacheKey(account);
   if (!cacheKey) {
-    return null;
+    return {};
   }
   const cached = oauthTokenCache.get(cacheKey);
   if (cached && cached.expiresAtMs > Date.now() + 60_000) {
-    return cached.token;
+    return { token: cached.token };
   }
 
   const assertion = buildJwtAssertion({
@@ -99,7 +103,10 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<stri
   });
 
   if (!tokenResponse.ok) {
-    return null;
+    return {
+      status: tokenResponse.status,
+      body: await tokenResponse.text().catch(() => ""),
+    };
   }
 
   const tokenPayload = (await tokenResponse.json().catch(() => null)) as {
@@ -109,7 +116,7 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<stri
   const accessToken =
     typeof tokenPayload?.access_token === "string" ? tokenPayload.access_token.trim() : "";
   if (!accessToken) {
-    return null;
+    return { body: "missing access_token in token response" };
   }
 
   const expiresInSeconds =
@@ -123,7 +130,7 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<stri
     expiresAtMs: Date.now() + safeExpiresIn * 1000,
   });
 
-  return accessToken;
+  return { token: accessToken };
 }
 
 async function postUserMessage(params: {
@@ -163,9 +170,15 @@ export async function sendMessageNaverWorks(params: {
   }
 
   const usesStaticAccessToken = Boolean(account.accessToken);
-  const accessToken = account.accessToken ?? (await issueAccessTokenWithJwt(account));
+  const issuedToken = account.accessToken ? undefined : await issueAccessTokenWithJwt(account);
+  const accessToken = account.accessToken ?? issuedToken?.token;
   if (!accessToken) {
-    return { ok: false, reason: "auth-error" };
+    return {
+      ok: false,
+      reason: "auth-error",
+      status: issuedToken?.status,
+      body: issuedToken?.body,
+    };
   }
 
   let response = await postUserMessage({ account, toUserId, text, accessToken });
@@ -175,10 +188,16 @@ export async function sendMessageNaverWorks(params: {
     if (cacheKey) {
       oauthTokenCache.delete(cacheKey);
     }
-    const refreshedToken = await issueAccessTokenWithJwt(account);
+    const refreshedTokenResult = await issueAccessTokenWithJwt(account);
+    const refreshedToken = refreshedTokenResult.token;
     if (!refreshedToken) {
       const body = await response.text().catch(() => "");
-      return { ok: false, reason: "auth-error", status: response.status, body };
+      return {
+        ok: false,
+        reason: "auth-error",
+        status: refreshedTokenResult.status ?? response.status,
+        body: refreshedTokenResult.body ?? body,
+      };
     }
     response = await postUserMessage({ account, toUserId, text, accessToken: refreshedToken });
   }

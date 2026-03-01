@@ -168,4 +168,46 @@ describe("sendMessageNaverWorks", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+  it("returns auth-error details when JWT token endpoint fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("invalid_client", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const generatedPrivateKey = crypto
+      .generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+      })
+      .privateKey.export({ type: "pkcs8", format: "pem" })
+      .toString();
+
+    const result = await sendMessageNaverWorks({
+      account: {
+        accountId: "auth-fail",
+        enabled: true,
+        webhookPath: "/naverworks/events",
+        dmPolicy: "open",
+        allowFrom: [],
+        botName: "bot",
+        strictBinding: true,
+        botId: "bot-1",
+        clientId: "client-auth-fail",
+        serviceAccount: "svc-auth-fail@example.com",
+        privateKey: generatedPrivateKey,
+        scope: "bot",
+        tokenUrl: "https://auth.worksmobile.com/oauth2/v2.0/token",
+        apiBaseUrl: "https://www.worksapis.com/v1.0",
+        jwtIssuer: "issuer-auth-fail",
+      },
+      toUserId: "user-1",
+      text: "hello",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "auth-error",
+      status: 401,
+      body: "invalid_client",
+    });
+  });
 });
