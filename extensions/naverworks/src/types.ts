@@ -6,6 +6,9 @@ export type NaverWorksAccount = {
   allowFrom: string[];
   botName: string;
   strictBinding: boolean;
+  botId?: string;
+  accessToken?: string;
+  apiBaseUrl: string;
 };
 
 export type NaverWorksInboundEvent = {

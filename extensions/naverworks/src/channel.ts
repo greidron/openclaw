@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { listAccountIds, resolveAccount } from "./accounts.js";
 import { getNaverWorksRuntime } from "./runtime.js";
+import { sendMessageNaverWorks } from "./send.js";
 import { createNaverWorksWebhookHandler } from "./webhook-handler.js";
 
 const CHANNEL_ID = "naverworks";
@@ -19,6 +20,9 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       webhookPath: z.string().optional(),
       botName: z.string().optional(),
       strictBinding: z.boolean().optional(),
+      botId: z.string().optional(),
+      accessToken: z.string().optional(),
+      apiBaseUrl: z.string().optional(),
     })
     .passthrough(),
 );
@@ -46,7 +50,7 @@ export function createNaverWorksPlugin() {
       reactions: false,
       edit: false,
       unsend: false,
-      reply: false,
+      reply: true,
       effects: false,
       blockStreaming: false,
     },
@@ -74,7 +78,7 @@ export function createNaverWorksPlugin() {
         log?.info?.(`naverworks[${accountId ?? DEFAULT_ACCOUNT_ID}]: start requested`);
         const account = resolveAccount(cfg, accountId);
         log?.info?.(
-          `naverworks[${account.accountId}]: resolved config (enabled=${account.enabled}, webhookPath=${account.webhookPath}, dmPolicy=${account.dmPolicy}, strictBinding=${account.strictBinding})`,
+          `naverworks[${account.accountId}]: resolved config (enabled=${account.enabled}, webhookPath=${account.webhookPath}, dmPolicy=${account.dmPolicy}, strictBinding=${account.strictBinding}, outboundConfigured=${Boolean(account.botId && account.accessToken)})`,
         );
         if (!account.enabled) {
           log?.info?.(`naverworks[${account.accountId}]: disabled; skipping start`);
@@ -143,12 +147,34 @@ export function createNaverWorksPlugin() {
                 onReplyStart: () => {
                   log?.info?.(`naverworks: reply started for ${event.userId} (${route.agentId})`);
                 },
-                // Phase 1: inbound/routing only. Outbound API integration comes next phase.
                 deliver: async (payload: { text?: string; body?: string }) => {
                   const text = payload?.text ?? payload?.body;
-                  if (text) {
-                    log?.info?.(`naverworks phase1 outbound placeholder: ${text.slice(0, 120)}`);
+                  if (!text) {
+                    return;
                   }
+
+                  const sent = await sendMessageNaverWorks({
+                    account,
+                    toUserId: event.userId,
+                    text,
+                  });
+
+                  if (!sent.ok) {
+                    if (sent.reason === "not-configured") {
+                      log?.warn?.(
+                        `naverworks[${account.accountId}]: outbound skipped (set botId/accessToken to enable delivery)`,
+                      );
+                      return;
+                    }
+                    log?.error?.(
+                      `naverworks[${account.accountId}]: outbound send failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""}`,
+                    );
+                    return;
+                  }
+
+                  log?.info?.(
+                    `naverworks[${account.accountId}]: outbound delivered to ${event.userId}`,
+                  );
                 },
               },
             });

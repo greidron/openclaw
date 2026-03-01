@@ -52,5 +52,11 @@ export function resolveAccount(
       (accountCfg.strictBinding as boolean | undefined) ??
       (section.strictBinding as boolean | undefined) ??
       true,
+    botId: asString(accountCfg.botId) ?? asString(section.botId),
+    accessToken: asString(accountCfg.accessToken) ?? asString(section.accessToken),
+    apiBaseUrl:
+      asString(accountCfg.apiBaseUrl) ??
+      asString(section.apiBaseUrl) ??
+      "https://www.worksapis.com/v1.0",
   };
 }
