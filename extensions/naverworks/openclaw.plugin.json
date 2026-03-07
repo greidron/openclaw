@@ -1,0 +1,9 @@
+{
+  "id": "naverworks",
+  "channels": ["naverworks"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
