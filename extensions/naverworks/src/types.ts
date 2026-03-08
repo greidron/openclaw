@@ -17,6 +17,7 @@ export type NaverWorksAccount = {
   tokenUrl: string;
   jwtIssuer?: string;
   apiBaseUrl: string;
+  markdownMode: "plain" | "auto-flex";
 };
 
 export type NaverWorksInboundEvent = {
