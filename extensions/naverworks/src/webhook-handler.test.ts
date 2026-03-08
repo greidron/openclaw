@@ -38,6 +38,59 @@ describe("parseNaverWorksInbound", () => {
     expect(parsed?.teamId).toBe("12345");
   });
 
+  it("parses image-only payloads without text", () => {
+    const payload = JSON.stringify({
+      source: { userId: "u3", teamId: "team-a" },
+      content: {
+        type: "image",
+        resourceUrl: "https://cdn.example.com/img-1.png",
+        fileName: "img-1.png",
+        mimeType: "image/png",
+      },
+      channel: { type: "direct" },
+    });
+
+    const parsed = parseNaverWorksInbound(payload);
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        userId: "u3",
+        text: undefined,
+        mediaKind: "image",
+        mediaUrl: "https://cdn.example.com/img-1.png",
+        mediaFileName: "img-1.png",
+        mediaMimeType: "image/png",
+        isDirect: true,
+      }),
+    );
+  });
+
+  it("parses voice payloads and normalizes duration", () => {
+    const payload = JSON.stringify({
+      source: { userId: "u4" },
+      content: {
+        type: "voice",
+        file: {
+          url: "https://cdn.example.com/voice-1.ogg",
+          mimeType: "audio/ogg",
+          duration: 4.2,
+        },
+      },
+      channel: { type: "dm" },
+    });
+
+    const parsed = parseNaverWorksInbound(payload);
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        userId: "u4",
+        text: undefined,
+        mediaKind: "audio",
+        mediaUrl: "https://cdn.example.com/voice-1.ogg",
+        mediaMimeType: "audio/ogg",
+        mediaDurationMs: 4200,
+        isDirect: true,
+      }),
+    );
+  });
   it("marks non-direct events so phase1 can ignore them", () => {
     const payload = JSON.stringify({
       source: { userId: "u1", domainId: "ws1" },

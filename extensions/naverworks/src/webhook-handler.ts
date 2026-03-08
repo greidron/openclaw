@@ -37,6 +37,58 @@ function asString(value: unknown): string | undefined {
   return undefined;
 }
 
+function parseMediaDurationMs(candidates: unknown[]): number | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
+      return Math.round(candidate < 60 ? candidate * 1000 : candidate);
+    }
+    if (typeof candidate === "string") {
+      const parsed = Number.parseFloat(candidate.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        // Some payloads report duration in seconds. Normalize human-scale values to milliseconds.
+        return Math.round(parsed < 60 ? parsed * 1000 : parsed);
+      }
+    }
+  }
+  return undefined;
+}
+
+function inferMediaKind(params: {
+  contentType?: string;
+  mimeType?: string;
+  fileName?: string;
+}): "image" | "audio" | "file" | undefined {
+  const contentType = params.contentType?.toLowerCase();
+  if (contentType) {
+    if (contentType.includes("image") || contentType === "photo") {
+      return "image";
+    }
+    if (contentType.includes("audio") || contentType.includes("voice")) {
+      return "audio";
+    }
+    if (contentType !== "text") {
+      return "file";
+    }
+  }
+
+  const mimeType = params.mimeType?.toLowerCase();
+  if (mimeType?.startsWith("image/")) {
+    return "image";
+  }
+  if (mimeType?.startsWith("audio/")) {
+    return "audio";
+  }
+
+  const fileName = params.fileName?.toLowerCase();
+  if (fileName?.match(/\.(png|jpe?g|gif|webp|bmp|heic)$/)) {
+    return "image";
+  }
+  if (fileName?.match(/\.(mp3|m4a|wav|ogg|opus|aac|flac|amr)$/)) {
+    return "audio";
+  }
+  return undefined;
+}
+
 function pickFirstString(candidates: unknown[]): string | undefined {
   for (const candidate of candidates) {
     const value = asString(candidate);
@@ -117,8 +169,55 @@ export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent 
     root.senderId,
   ]);
   const text = pickFirstString([content.text, message.text, root.text, root.body, root.message]);
+  const resource = asObject(content.resource);
+  const file = asObject(content.file);
+  const attachment = asObject(content.attachment);
+  const media = asObject(content.media);
 
-  if (!userId || !text) {
+  const mediaUrl = pickFirstString([
+    content.resourceUrl,
+    content.mediaUrl,
+    content.downloadUrl,
+    content.fileUrl,
+    resource.url,
+    resource.downloadUrl,
+    resource.resourceUrl,
+    file.url,
+    file.downloadUrl,
+    attachment.url,
+    media.url,
+    root.mediaUrl,
+    root.fileUrl,
+  ]);
+
+  const mediaMimeType = pickFirstString([
+    content.mimeType,
+    content.contentType,
+    content.mimetype,
+    resource.mimeType,
+    file.mimeType,
+    attachment.mimeType,
+    media.mimeType,
+    root.mimeType,
+  ]);
+
+  const mediaFileName = pickFirstString([
+    content.fileName,
+    content.filename,
+    resource.fileName,
+    file.fileName,
+    file.filename,
+    attachment.fileName,
+    root.fileName,
+  ]);
+
+  const mediaKind = inferMediaKind({
+    contentType: pickFirstString([content.type, message.type, root.type]),
+    mimeType: mediaMimeType,
+    fileName: mediaFileName,
+  });
+
+  if (!userId || (!text && !mediaUrl)) {
     return null;
   }
 
@@ -152,6 +251,22 @@ export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent 
     userId,
     teamId,
     text,
+    mediaUrl,
+    mediaKind,
+    mediaMimeType,
+    mediaFileName,
+    mediaDurationMs: parseMediaDurationMs([
+      content.durationMs,
+      content.duration,
+      resource.durationMs,
+      resource.duration,
+      file.durationMs,
+      file.duration,
+      media.durationMs,
+      media.duration,
+      root.durationMs,
+      root.duration,
+    ]),
     isDirect,
     senderName,
   };

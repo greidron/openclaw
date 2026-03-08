@@ -2,12 +2,13 @@ import {
   DEFAULT_ACCOUNT_ID,
   buildChannelConfigSchema,
   registerPluginHttpRoute,
+  resolveOutboundMediaUrls,
   setAccountEnabledInConfigSection,
 } from "openclaw/plugin-sdk";
 import { z } from "zod";
 import { listAccountIds, resolveAccount } from "./accounts.js";
 import { getNaverWorksRuntime } from "./runtime.js";
-import { sendMessageNaverWorks } from "./send.js";
+import { resolveNaverWorksAccessToken, sendMessageNaverWorks } from "./send.js";
 import { createNaverWorksWebhookHandler } from "./webhook-handler.js";
 
 const CHANNEL_ID = "naverworks";
@@ -37,6 +38,53 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
 
 const activeRouteUnregisters = new Map<string, () => void>();
 
+async function downloadInboundMedia(params: {
+  runtime: ReturnType<typeof getNaverWorksRuntime>;
+  account: ReturnType<typeof resolveAccount>;
+  event: { mediaUrl?: string; mediaMimeType?: string; mediaFileName?: string; mediaKind?: string };
+  log?: { warn?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void };
+}): Promise<{ path?: string; mediaType?: string }> {
+  const mediaUrl = params.event.mediaUrl?.trim();
+  if (!mediaUrl) {
+    return {};
+  }
+
+  const maxBytes = 20 * 1024 * 1024;
+  const headers: Record<string, string> = {};
+  const accessToken = await resolveNaverWorksAccessToken(params.account);
+  if (accessToken.ok) {
+    headers.Authorization = `Bearer ${accessToken.token}`;
+  } else {
+    params.log?.warn?.(
+      `naverworks[${params.account.accountId}]: inbound media fetch proceeding without bot auth (status=${accessToken.status ?? "unknown"})`,
+    );
+  }
+
+  try {
+    const fetched = await params.runtime.channel.media.fetchRemoteMedia({
+      url: mediaUrl,
+      maxBytes,
+      requestInit: Object.keys(headers).length > 0 ? { headers } : undefined,
+    });
+    const saved = await params.runtime.channel.media.saveMediaBuffer(
+      fetched.buffer,
+      fetched.contentType ?? params.event.mediaMimeType,
+      "inbound",
+      maxBytes,
+      fetched.fileName ?? params.event.mediaFileName ?? params.event.mediaKind,
+    );
+    return {
+      path: saved.path,
+      mediaType: saved.contentType ?? fetched.contentType ?? params.event.mediaMimeType,
+    };
+  } catch (error) {
+    params.log?.error?.(
+      `naverworks[${params.account.accountId}]: failed to download inbound media ${mediaUrl}: ${String(error)}`,
+    );
+    return { mediaType: params.event.mediaMimeType };
+  }
+}
+
 export function createNaverWorksPlugin() {
   return {
     id: CHANNEL_ID,
@@ -53,7 +101,7 @@ export function createNaverWorksPlugin() {
 
     capabilities: {
       chatTypes: ["direct" as const],
-      media: false,
+      media: true,
       threads: false,
       reactions: false,
       edit: false,
@@ -130,11 +178,27 @@ export function createNaverWorksPlugin() {
               return;
             }
 
+            const inboundBody =
+              event.text?.trim() || (event.mediaKind ? `<media:${event.mediaKind}>` : "<media>");
+            const downloadedMedia = await downloadInboundMedia({
+              runtime,
+              account,
+              event,
+              log,
+            });
+            const mediaPath = downloadedMedia.path;
+            const mediaUrls = event.mediaUrl ? [event.mediaUrl] : undefined;
+            const mediaPaths = mediaPath ? [mediaPath] : undefined;
+            const mediaTypes =
+              downloadedMedia.mediaType || event.mediaMimeType
+                ? [downloadedMedia.mediaType ?? event.mediaMimeType ?? "application/octet-stream"]
+                : undefined;
+
             const msgCtx = {
-              Body: event.text,
-              BodyForAgent: event.text,
-              RawBody: event.text,
-              CommandBody: event.text,
+              Body: inboundBody,
+              BodyForAgent: inboundBody,
+              RawBody: inboundBody,
+              CommandBody: inboundBody,
               From: `naverworks:${event.userId}`,
               To: `naverworks:${account.accountId}`,
               SessionKey: route.sessionKey,
@@ -146,6 +210,13 @@ export function createNaverWorksPlugin() {
               Surface: CHANNEL_ID,
               OriginatingChannel: CHANNEL_ID,
               OriginatingTo: `naverworks:${account.accountId}`,
+              MediaPath: mediaPath,
+              MediaPaths: mediaPaths,
+              MediaType: downloadedMedia.mediaType ?? event.mediaMimeType,
+              MediaTypes: mediaTypes,
+              MediaUrl: event.mediaUrl ?? mediaPath,
+              MediaUrls: mediaUrls,
+              MediaName: event.mediaFileName,
             };
 
             await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
@@ -155,40 +226,83 @@ export function createNaverWorksPlugin() {
                 onReplyStart: () => {
                   log?.info?.(`naverworks: reply started for ${event.userId} (${route.agentId})`);
                 },
-                deliver: async (payload: { text?: string; body?: string }) => {
+                deliver: async (payload: {
+                  text?: string;
+                  body?: string;
+                  mediaUrl?: string;
+                  mediaUrls?: string[];
+                  audioAsVoice?: boolean;
+                }) => {
                   const text = payload?.text ?? payload?.body;
-                  if (!text) {
-                    return;
-                  }
+                  const mediaUrls = resolveOutboundMediaUrls(payload ?? {});
+                  const remoteMediaUrls = mediaUrls.filter((url) => /^https?:\/\//i.test(url));
+                  const localMediaPaths = mediaUrls.filter((url) => !/^https?:\/\//i.test(url));
 
-                  const sent = await sendMessageNaverWorks({
-                    account,
-                    toUserId: event.userId,
-                    text,
-                  });
-
-                  if (!sent.ok) {
-                    if (sent.reason === "not-configured") {
-                      log?.warn?.(
-                        `naverworks[${account.accountId}]: outbound skipped (set botId and auth settings to enable delivery)`,
-                      );
-                      return;
-                    }
-                    if (sent.reason === "auth-error") {
-                      log?.error?.(
-                        `naverworks[${account.accountId}]: outbound auth failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""} (check accessToken or JWT auth settings)`,
-                      );
-                      return;
-                    }
-                    log?.error?.(
-                      `naverworks[${account.accountId}]: outbound send failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""}`,
+                  if (localMediaPaths.length > 0) {
+                    log?.warn?.(
+                      `naverworks[${account.accountId}]: skipped ${localMediaPaths.length} local media attachment(s); NAVER WORKS requires remotely reachable media URLs`,
                     );
-                    return;
                   }
 
-                  log?.info?.(
-                    `naverworks[${account.accountId}]: outbound delivered to ${event.userId}`,
-                  );
+                  if (text) {
+                    const sent = await sendMessageNaverWorks({
+                      account,
+                      toUserId: event.userId,
+                      text,
+                    });
+
+                    if (!sent.ok) {
+                      if (sent.reason === "not-configured") {
+                        log?.warn?.(
+                          `naverworks[${account.accountId}]: outbound skipped (set botId and auth settings to enable delivery)`,
+                        );
+                        return;
+                      }
+                      if (sent.reason === "auth-error") {
+                        log?.error?.(
+                          `naverworks[${account.accountId}]: outbound auth failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""} (check accessToken or JWT auth settings)`,
+                        );
+                        return;
+                      }
+                      log?.error?.(
+                        `naverworks[${account.accountId}]: outbound send failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""}`,
+                      );
+                      return;
+                    }
+
+                    log?.info?.(
+                      `naverworks[${account.accountId}]: outbound text delivered to ${event.userId}`,
+                    );
+                  }
+
+                  for (const mediaUrl of remoteMediaUrls) {
+                    const sentMedia = await sendMessageNaverWorks({
+                      account,
+                      toUserId: event.userId,
+                      mediaUrl,
+                    });
+                    if (!sentMedia.ok) {
+                      if (sentMedia.reason === "not-configured") {
+                        log?.warn?.(
+                          `naverworks[${account.accountId}]: outbound media skipped (set botId and auth settings to enable delivery)`,
+                        );
+                        return;
+                      }
+                      if (sentMedia.reason === "auth-error") {
+                        log?.error?.(
+                          `naverworks[${account.accountId}]: outbound media auth failed status=${sentMedia.status ?? "unknown"} body=${sentMedia.body?.slice(0, 300) ?? ""}`,
+                        );
+                        return;
+                      }
+                      log?.error?.(
+                        `naverworks[${account.accountId}]: outbound media send failed status=${sentMedia.status ?? "unknown"} body=${sentMedia.body?.slice(0, 300) ?? ""}`,
+                      );
+                      return;
+                    }
+                    log?.info?.(
+                      `naverworks[${account.accountId}]: outbound media delivered to ${event.userId}`,
+                    );
+                  }
                 },
               },
             });

@@ -23,7 +23,12 @@ export type NaverWorksInboundEvent = {
   raw: Record<string, unknown>;
   userId: string;
   teamId?: string;
-  text: string;
+  text?: string;
+  mediaUrl?: string;
+  mediaKind?: "image" | "audio" | "file";
+  mediaMimeType?: string;
+  mediaFileName?: string;
+  mediaDurationMs?: number;
   isDirect: boolean;
   senderName?: string;
 };

@@ -56,6 +56,61 @@ describe("sendMessageNaverWorks", () => {
     );
   });
 
+  it("posts image payload when mediaUrl points to an image", async () => {
+    const fetchMock = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await sendMessageNaverWorks({
+      account: {
+        accountId: "default",
+        enabled: true,
+        webhookPath: "/naverworks/events",
+        dmPolicy: "open",
+        allowFrom: [],
+        botName: "bot",
+        strictBinding: true,
+        botId: "bot-1",
+        accessToken: "token-1",
+        tokenUrl: "https://auth.worksmobile.com/oauth2/v2.0/token",
+        apiBaseUrl: "https://www.worksapis.com/v1.0",
+      },
+      toUserId: "user-1",
+      mediaUrl: "https://example.com/photo.png",
+    });
+
+    expect(result).toEqual({ ok: true });
+    const options = fetchMock.mock.calls[0]?.[1] as { body: string };
+    expect(options.body).toContain('"type":"image"');
+    expect(options.body).toContain('"resourceUrl":"https://example.com/photo.png"');
+  });
+
+  it("posts audio payload when mediaUrl points to an audio file", async () => {
+    const fetchMock = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await sendMessageNaverWorks({
+      account: {
+        accountId: "default",
+        enabled: true,
+        webhookPath: "/naverworks/events",
+        dmPolicy: "open",
+        allowFrom: [],
+        botName: "bot",
+        strictBinding: true,
+        botId: "bot-1",
+        accessToken: "token-1",
+        tokenUrl: "https://auth.worksmobile.com/oauth2/v2.0/token",
+        apiBaseUrl: "https://www.worksapis.com/v1.0",
+      },
+      toUserId: "user-1",
+      mediaUrl: "https://example.com/voice.ogg",
+    });
+
+    expect(result).toEqual({ ok: true });
+    const options = fetchMock.mock.calls[0]?.[1] as { body: string };
+    expect(options.body).toContain('"type":"audio"');
+    expect(options.body).toContain('"resourceUrl":"https://example.com/voice.ogg"');
+  });
   it("issues oauth token with JWT auth when accessToken is omitted", async () => {
     const fetchMock = vi
       .fn()

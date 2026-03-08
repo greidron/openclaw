@@ -5,14 +5,14 @@ title: "NAVER WORKS"
 
 # NAVER WORKS (plugin)
 
-Status: **phase 2 (DM-first inbound + outbound text delivery)**.
+Status: **phase 3 (DM-first inbound + outbound text + media delivery)**.
 
 Current phase focuses on:
 
 - webhook intake for NAVER WORKS events
 - DM-only handling (non-direct events are ignored)
 - deterministic agent routing by `peer` and optional `teamId`
-- outbound text delivery to NAVER WORKS DM with static token or JWT-based service-account auth
+- outbound text + media URL delivery to NAVER WORKS DM with static token or JWT-based service-account auth
 
 ## Install
 
@@ -71,6 +71,10 @@ openclaw plugins install ./extensions/naverworks
 ## Notes
 
 - Non-direct events are ignored in phase 1 by design.
+- Inbound media-only events are supported for direct messages. The plugin accepts image/audio/file payloads when a media URL is present, and forwards media metadata to the agent context.
+- Outbound media replies are sent when the agent returns `mediaUrl` or `mediaUrls`. URL suffixes are used to infer NAVER WORKS content type (`image`, `audio`, or `file`).
+- Inbound audio attachments are downloaded to local media storage when reachable, so OpenClaw media-understanding/STT can transcribe voice messages for agents.
+- Text-to-speech style audio replies are supported when the agent returns remote `mediaUrl`/`mediaUrls` audio links. Local file paths (for example raw `/tts audio` temp paths) are not uploadable by NAVER WORKS and are skipped with a warning.
 - `strictBinding` defaults to `true`. When no binding matches, the plugin drops the event instead of falling back to the default agent.
 - Set `strictBinding: false` if you want default-agent fallback behavior for unmatched DMs.
 - `teamId` matching uses the event payload value from `source.teamId`, `source.domainId`, `source.tenantId`, `teamId`, `domainId`, or `tenantId` (first non-empty value wins).
