@@ -8,6 +8,22 @@ type OAuthTokenCacheEntry = {
 
 const oauthTokenCache = new Map<string, OAuthTokenCacheEntry>();
 
+type NaverWorksOutboundContent =
+  | { type: "text"; text: string }
+  | { type: "image" | "audio" | "file"; resourceUrl: string };
+
+type NaverWorksAuthTokenResult =
+  | {
+      ok: true;
+      token: string;
+      usesStaticAccessToken: boolean;
+    }
+  | {
+      ok: false;
+      status?: number;
+      body?: string;
+    };
+
 function getOauthTokenCacheKey(account: NaverWorksAccount): string | null {
   const clientId = account.clientId?.trim();
   const serviceAccount = account.serviceAccount?.trim();
@@ -141,13 +157,48 @@ async function issueAccessTokenWithJwt(account: NaverWorksAccount): Promise<{
   return { token: accessToken };
 }
 
+function clearJwtTokenCache(account: NaverWorksAccount): void {
+  const cacheKey = getOauthTokenCacheKey(account);
+  if (cacheKey) {
+    oauthTokenCache.delete(cacheKey);
+  }
+}
+
+export async function resolveNaverWorksAccessToken(
+  account: NaverWorksAccount,
+): Promise<NaverWorksAuthTokenResult> {
+  const staticToken = account.accessToken?.trim();
+  if (staticToken) {
+    return {
+      ok: true,
+      token: staticToken,
+      usesStaticAccessToken: true,
+    };
+  }
+
+  const issuedToken = await issueAccessTokenWithJwt(account);
+  if (!issuedToken.token) {
+    return {
+      ok: false,
+      status: issuedToken.status,
+      body: issuedToken.body,
+    };
+  }
+
+  return {
+    ok: true,
+    token: issuedToken.token,
+    usesStaticAccessToken: false,
+  };
+}
+
 async function postUserMessage(params: {
   account: NaverWorksAccount;
   toUserId: string;
-  text: string;
+  content: NaverWorksOutboundContent;
   accessToken: string;
 }): Promise<Response> {
-  const { account, toUserId, text, accessToken } = params;
+  const { account, toUserId, content, accessToken } = params;
   const url = buildSendUrl(account, toUserId);
   return fetch(url, {
     method: "POST",
@@ -155,14 +206,41 @@ async function postUserMessage(params: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ content: { type: "text", text } }),
+    body: JSON.stringify({ content }),
   });
+}
+
+function inferMediaKindFromUrl(mediaUrl: string): "image" | "audio" | "file" {
+  const path = mediaUrl.split("?")[0]?.toLowerCase() ?? "";
+  if (path.match(/\.(png|jpe?g|gif|webp|bmp|heic|svg)$/)) {
+    return "image";
+  }
+  if (path.match(/\.(mp3|m4a|wav|ogg|opus|aac|flac|amr)$/)) {
+    return "audio";
+  }
+  return "file";
+}
+
+function buildOutboundContent(params: {
+  text?: string;
+  mediaUrl?: string;
+}): NaverWorksOutboundContent | null {
+  const text = params.text?.trim();
+  if (text) {
+    return { type: "text", text };
+  }
+  const mediaUrl = params.mediaUrl?.trim();
+  if (!mediaUrl) {
+    return null;
+  }
+  return { type: inferMediaKindFromUrl(mediaUrl), resourceUrl: mediaUrl };
 }
 
 export async function sendMessageNaverWorks(params: {
   account: NaverWorksAccount;
   toUserId: string;
-  text: string;
+  text?: string;
+  mediaUrl?: string;
 }): Promise<
   | { ok: true }
   | {
@@ -172,33 +250,32 @@ export async function sendMessageNaverWorks(params: {
       body?: string;
     }
 > {
-  const { account, toUserId, text } = params;
-  if (!account.botId) {
+  const { account, toUserId } = params;
+  const content = buildOutboundContent(params);
+  if (!account.botId || !content) {
     return { ok: false, reason: "not-configured" };
   }
 
-  const usesStaticAccessToken = Boolean(account.accessToken);
-  const issuedToken = account.accessToken ? undefined : await issueAccessTokenWithJwt(account);
-  const accessToken = account.accessToken ?? issuedToken?.token;
-  if (!accessToken) {
+  const accessTokenResult = await resolveNaverWorksAccessToken(account);
+  if (!accessTokenResult.ok) {
     return {
       ok: false,
       reason: "auth-error",
-      status: issuedToken?.status,
-      body: issuedToken?.body,
+      status: accessTokenResult.status,
+      body: accessTokenResult.body,
     };
   }
 
-  let response = await postUserMessage({ account, toUserId, text, accessToken });
+  let accessToken = accessTokenResult.token;
+  let response = await postUserMessage({ account, toUserId, content, accessToken });
 
-  if (!usesStaticAccessToken && (response.status === 401 || response.status === 403)) {
-    const cacheKey = getOauthTokenCacheKey(account);
-    if (cacheKey) {
-      oauthTokenCache.delete(cacheKey);
-    }
-    const refreshedTokenResult = await issueAccessTokenWithJwt(account);
-    const refreshedToken = refreshedTokenResult.token;
-    if (!refreshedToken) {
+  if (
+    !accessTokenResult.usesStaticAccessToken &&
+    (response.status === 401 || response.status === 403)
+  ) {
+    clearJwtTokenCache(account);
+    const refreshedTokenResult = await resolveNaverWorksAccessToken(account);
+    if (!refreshedTokenResult.ok) {
       const body = await response.text().catch(() => "");
       return {
         ok: false,
@@ -207,7 +284,8 @@ export async function sendMessageNaverWorks(params: {
         body: refreshedTokenResult.body ?? body,
       };
     }
-    response = await postUserMessage({ account, toUserId, text, accessToken: refreshedToken });
+    accessToken = refreshedTokenResult.token;
+    response = await postUserMessage({ account, toUserId, content, accessToken });
   }
 
   if (response.ok) {
