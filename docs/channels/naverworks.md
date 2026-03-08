@@ -53,6 +53,7 @@ openclaw plugins install ./extensions/naverworks
       jwtIssuer: "your-jwt-issuer", // optional (default: clientId)
 
       apiBaseUrl: "https://www.worksapis.com/v1.0", // optional
+      markdownMode: "auto-flex", // optional: auto-flex | plain
     },
   },
   bindings: [
@@ -73,6 +74,8 @@ openclaw plugins install ./extensions/naverworks
 - Non-direct events are ignored in phase 1 by design.
 - Inbound media-only events are supported for direct messages. The plugin accepts image/audio/file payloads when a media URL is present, and forwards media metadata to the agent context.
 - Outbound media replies are sent when the agent returns `mediaUrl` or `mediaUrls`. URL suffixes are used to infer NAVER WORKS content type (`image`, `audio`, or `file`).
+- Outbound text replies default to `markdownMode: "auto-flex"`, which detects markdown (headings/lists/links/tables/code blocks) and sends a NAVER WORKS Flexible Template (`content.type: "flex"`) for improved readability.
+- Set `markdownMode: "plain"` if you always want raw text delivery (no markdown-to-flex conversion).
 - Inbound audio attachments are downloaded to local media storage when reachable, so OpenClaw media-understanding/STT can transcribe voice messages for agents.
 - Text-to-speech style audio replies are supported when the agent returns remote `mediaUrl`/`mediaUrls` audio links. Local file paths (for example raw `/tts audio` temp paths) are not uploadable by NAVER WORKS and are skipped with a warning.
 - `strictBinding` defaults to `true`. When no binding matches, the plugin drops the event instead of falling back to the default agent.
