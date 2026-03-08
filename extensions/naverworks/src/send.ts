@@ -233,13 +233,14 @@ function inferMediaKindFromUrl(mediaUrl: string): "image" | "audio" | "file" {
 
 function buildOutboundContent(params: {
   markdownMode: NaverWorksAccount["markdownMode"];
+  markdownTheme: NaverWorksAccount["markdownTheme"];
   text?: string;
   mediaUrl?: string;
 }): NaverWorksOutboundContent | null {
   const text = params.text?.trim();
   if (text) {
     if (params.markdownMode === "auto-flex") {
-      const flexPayload = markdownToNaverWorksFlexTemplate(text);
+      const flexPayload = markdownToNaverWorksFlexTemplate(text, { theme: params.markdownTheme });
       if (flexPayload) {
         return {
           type: "flex",
@@ -274,6 +275,7 @@ export async function sendMessageNaverWorks(params: {
   const { account, toUserId } = params;
   const content = buildOutboundContent({
     markdownMode: account.markdownMode,
+    markdownTheme: account.markdownTheme,
     text: params.text,
     mediaUrl: params.mediaUrl,
   });

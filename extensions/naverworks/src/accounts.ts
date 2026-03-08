@@ -83,5 +83,9 @@ export function resolveAccount(
       (asString(accountCfg.markdownMode) as NaverWorksAccount["markdownMode"] | undefined) ??
       (asString(section.markdownMode) as NaverWorksAccount["markdownMode"] | undefined) ??
       "auto-flex",
+    markdownTheme:
+      (asString(accountCfg.markdownTheme) as NaverWorksAccount["markdownTheme"] | undefined) ??
+      (asString(section.markdownTheme) as NaverWorksAccount["markdownTheme"] | undefined) ??
+      "auto",
   };
 }

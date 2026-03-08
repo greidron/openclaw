@@ -19,6 +19,27 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     expect(JSON.stringify(payload)).toContain("OpenClaw (https://openclaw.ai)");
   });
 
+  it("uses higher-contrast text colors and md size for light theme", () => {
+    const payload = markdownToNaverWorksFlexTemplate("# Title\n- hello", { theme: "light" });
+
+    expect(payload).toBeTruthy();
+    const textNodes = (payload?.contents.body.contents ?? []).filter(
+      (entry) => entry.type === "text",
+    );
+    expect(textNodes.length).toBeGreaterThan(0);
+    expect(textNodes.every((entry) => entry.type === "text" && entry.size === "md")).toBe(true);
+    expect(JSON.stringify(payload)).toContain('"color":"#000000"');
+    expect(JSON.stringify(payload)).toContain('"color":"#111111"');
+  });
+
+  it("uses light text in dark theme", () => {
+    const payload = markdownToNaverWorksFlexTemplate("# Title\n- hello", { theme: "dark" });
+
+    expect(payload).toBeTruthy();
+    expect(JSON.stringify(payload)).toContain('"color":"#ffffff"');
+    expect(JSON.stringify(payload)).toContain('"color":"#f5f5f5"');
+  });
+
   it("includes table and code sections in the output", () => {
     const payload = markdownToNaverWorksFlexTemplate(
       [

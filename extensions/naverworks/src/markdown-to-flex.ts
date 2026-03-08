@@ -125,19 +125,23 @@ function normalizeInlineMarkdown(text: string): string {
 
 function toTextComponent(
   text: string,
-  options?: { bold?: boolean; margin?: "none" | "sm" | "md" },
+  options?: { bold?: boolean; margin?: "none" | "sm" | "md"; color?: string; size?: "sm" | "md" },
 ) {
   return {
     type: "text" as const,
     text: text.slice(0, 2000),
     wrap: true,
-    size: "sm" as const,
+    size: (options?.size ?? "md") as const,
+    color: options?.color,
     weight: options?.bold ? ("bold" as const) : undefined,
     margin: options?.margin,
   };
 }
 
-export function markdownToNaverWorksFlexTemplate(text: string): {
+export function markdownToNaverWorksFlexTemplate(
+  text: string,
+  options?: { theme?: "light" | "dark" | "auto" },
+): {
   altText: string;
   contents: NaverWorksFlexContainer;
 } | null {
@@ -154,12 +158,16 @@ export function markdownToNaverWorksFlexTemplate(text: string): {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
+  const resolvedTheme = options?.theme ?? "auto";
+  const textColor = resolvedTheme === "dark" ? "#f5f5f5" : "#111111";
+  const sectionTitleColor = resolvedTheme === "dark" ? "#ffffff" : "#000000";
+
   const contents: NaverWorksFlexComponent[] = [];
 
   if (lines.length > 0) {
-    contents.push(toTextComponent(lines[0], { bold: true }));
+    contents.push(toTextComponent(lines[0], { bold: true, color: sectionTitleColor, size: "md" }));
     for (const line of lines.slice(1, 8)) {
-      contents.push(toTextComponent(line, { margin: "sm" }));
+      contents.push(toTextComponent(line, { margin: "sm", color: textColor, size: "md" }));
     }
   }
 
@@ -168,9 +176,16 @@ export function markdownToNaverWorksFlexTemplate(text: string): {
       contents.push({ type: "separator", margin: "md" });
     }
     const tableLines = table.split("\n").filter(Boolean);
-    contents.push(toTextComponent(tableLines[0] ?? "Table", { bold: true, margin: "sm" }));
+    contents.push(
+      toTextComponent(tableLines[0] ?? "Table", {
+        bold: true,
+        margin: "sm",
+        color: sectionTitleColor,
+        size: "md",
+      }),
+    );
     for (const line of tableLines.slice(1, 5)) {
-      contents.push(toTextComponent(line, { margin: "sm" }));
+      contents.push(toTextComponent(line, { margin: "sm", color: textColor, size: "md" }));
     }
   }
 
@@ -179,14 +194,26 @@ export function markdownToNaverWorksFlexTemplate(text: string): {
       contents.push({ type: "separator", margin: "md" });
     }
     const codeLines = codeBlock.split("\n").filter(Boolean);
-    contents.push(toTextComponent(codeLines[0] ?? "Code", { bold: true, margin: "sm" }));
+    contents.push(
+      toTextComponent(codeLines[0] ?? "Code", {
+        bold: true,
+        margin: "sm",
+        color: sectionTitleColor,
+        size: "md",
+      }),
+    );
     for (const line of codeLines.slice(1, 6)) {
-      contents.push(toTextComponent(line, { margin: "sm" }));
+      contents.push(toTextComponent(line, { margin: "sm", color: textColor, size: "md" }));
     }
   }
 
   if (contents.length === 0) {
-    contents.push(toTextComponent(normalizedText.slice(0, 1000) || trimmed.slice(0, 1000)));
+    contents.push(
+      toTextComponent(normalizedText.slice(0, 1000) || trimmed.slice(0, 1000), {
+        color: textColor,
+        size: "md",
+      }),
+    );
   }
 
   return {

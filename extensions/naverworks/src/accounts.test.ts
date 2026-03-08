@@ -96,9 +96,30 @@ describe("resolveAccount", () => {
     expect(account.botSecret).toBe("acc-secret");
   });
 
-  it("defaults markdownMode to auto-flex", () => {
+  it("defaults markdown rendering mode/theme", () => {
     const account = resolveAccount({ channels: { naverworks: {} } }, "default");
     expect(account.markdownMode).toBe("auto-flex");
+    expect(account.markdownTheme).toBe("auto");
+  });
+
+  it("allows markdown theme override per account", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            markdownTheme: "light",
+            accounts: {
+              default: {
+                markdownTheme: "dark",
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.markdownTheme).toBe("dark");
   });
 
   it("allows markdownMode override per account", () => {
