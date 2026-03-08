@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  markdownToNaverWorksFlexTemplate,
+  type NaverWorksFlexContainer,
+} from "./markdown-to-flex.js";
 import type { NaverWorksAccount } from "./types.js";
 
 type OAuthTokenCacheEntry = {
@@ -10,6 +14,12 @@ const oauthTokenCache = new Map<string, OAuthTokenCacheEntry>();
 
 type NaverWorksOutboundContent =
   | { type: "text"; text: string }
+  | {
+      type: "flex";
+      altText: string;
+      contents: NaverWorksFlexContainer;
+      i18nAltTexts?: Array<{ language: string; altText: string }>;
+    }
   | { type: "image" | "audio" | "file"; resourceUrl: string };
 
 type NaverWorksAuthTokenResult =
@@ -222,11 +232,22 @@ function inferMediaKindFromUrl(mediaUrl: string): "image" | "audio" | "file" {
 }
 
 function buildOutboundContent(params: {
+  markdownMode: NaverWorksAccount["markdownMode"];
   text?: string;
   mediaUrl?: string;
 }): NaverWorksOutboundContent | null {
   const text = params.text?.trim();
   if (text) {
+    if (params.markdownMode === "auto-flex") {
+      const flexPayload = markdownToNaverWorksFlexTemplate(text);
+      if (flexPayload) {
+        return {
+          type: "flex",
+          altText: flexPayload.altText,
+          contents: flexPayload.contents,
+        };
+      }
+    }
     return { type: "text", text };
   }
   const mediaUrl = params.mediaUrl?.trim();
@@ -251,7 +272,11 @@ export async function sendMessageNaverWorks(params: {
     }
 > {
   const { account, toUserId } = params;
-  const content = buildOutboundContent(params);
+  const content = buildOutboundContent({
+    markdownMode: account.markdownMode,
+    text: params.text,
+    mediaUrl: params.mediaUrl,
+  });
   if (!account.botId || !content) {
     return { ok: false, reason: "not-configured" };
   }

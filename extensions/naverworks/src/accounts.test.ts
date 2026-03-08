@@ -95,4 +95,29 @@ describe("resolveAccount", () => {
 
     expect(account.botSecret).toBe("acc-secret");
   });
+
+  it("defaults markdownMode to auto-flex", () => {
+    const account = resolveAccount({ channels: { naverworks: {} } }, "default");
+    expect(account.markdownMode).toBe("auto-flex");
+  });
+
+  it("allows markdownMode override per account", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            markdownMode: "plain",
+            accounts: {
+              default: {
+                markdownMode: "auto-flex",
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.markdownMode).toBe("auto-flex");
+  });
 });

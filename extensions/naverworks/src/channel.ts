@@ -32,6 +32,7 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       tokenUrl: z.string().optional(),
       jwtIssuer: z.string().optional(),
       apiBaseUrl: z.string().optional(),
+      markdownMode: z.enum(["plain", "auto-flex"]).optional(),
     })
     .passthrough(),
 );
@@ -314,6 +315,7 @@ export function createNaverWorksPlugin() {
 
         const unregister = registerPluginHttpRoute({
           path: account.webhookPath,
+          auth: "plugin",
           pluginId: CHANNEL_ID,
           accountId: account.accountId,
           log: (line: string) => log?.info?.(line),
