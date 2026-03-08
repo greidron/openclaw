@@ -79,5 +79,9 @@ export function resolveAccount(
       asString(accountCfg.apiBaseUrl) ??
       asString(section.apiBaseUrl) ??
       "https://www.worksapis.com/v1.0",
+    markdownMode:
+      (asString(accountCfg.markdownMode) as NaverWorksAccount["markdownMode"] | undefined) ??
+      (asString(section.markdownMode) as NaverWorksAccount["markdownMode"] | undefined) ??
+      "auto-flex",
   };
 }
