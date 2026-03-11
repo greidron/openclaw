@@ -1145,6 +1145,12 @@ importers:
         specifier: 2026.5.28
         version: 2026.5.28
 
+  extensions/naverworks:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
   extensions/nextcloud-talk:
     dependencies:
       zod:
