@@ -217,43 +217,38 @@ describe("web_search playwright-mcp config resolution", () => {
     });
   });
 
-  it("selects best available MCP tool name", () => {
+  it("prefers explicitly requested MCP tool when available", () => {
     expect(
       resolvePlaywrightMcpToolPlan({
         requestedToolName: "web_search",
-        availableToolNames: ["search_web", "other"],
+        availableToolNames: ["web_search", "browser_navigate", "browser_snapshot"],
       }),
-    ).toEqual({ kind: "search_tool", toolName: "search_web" });
-    expect(
-      resolvePlaywrightMcpToolPlan({
-        requestedToolName: "web_search",
-        availableToolNames: ["find_search_results", "other"],
-      }),
-    ).toEqual({ kind: "search_tool", toolName: "find_search_results" });
+    ).toEqual({ kind: "search_tool", toolName: "web_search" });
   });
 
-  it("throws a clear error when no search-like MCP tool exists", () => {
+  it("uses official playwright workflow tools when search tool is unavailable", () => {
+    expect(
+      resolvePlaywrightMcpToolPlan({
+        requestedToolName: "web_search",
+        availableToolNames: ["browser_navigate", "browser_snapshot", "browser_wait_for"],
+      }),
+    ).toEqual({
+      kind: "browser_workflow",
+      navigateToolName: "browser_navigate",
+      snapshotToolName: "browser_snapshot",
+      waitForToolName: "browser_wait_for",
+    });
+  });
+
+  it("throws a clear error when official tool plan is unavailable", () => {
     expect(() =>
       resolvePlaywrightMcpToolPlan({
         requestedToolName: "web_search",
         availableToolNames: ["navigate", "click"],
       }),
     ).toThrow(
-      'Playwright MCP cannot find a usable search tool/workflow. Requested tool: "web_search". Available tools: navigate, click',
+      'Playwright MCP cannot find a usable tool plan. Expected "web_search" or official workflow tools (browser_navigate + browser_snapshot). Available tools: navigate, click',
     );
-  });
-
-  it("falls back to browser workflow when navigate + snapshot tools are available", () => {
-    expect(
-      resolvePlaywrightMcpToolPlan({
-        requestedToolName: "web_search",
-        availableToolNames: ["browser_navigate", "browser_snapshot", "browser_click"],
-      }),
-    ).toEqual({
-      kind: "browser_workflow",
-      navigateToolName: "browser_navigate",
-      snapshotToolName: "browser_snapshot",
-    });
   });
 });
 

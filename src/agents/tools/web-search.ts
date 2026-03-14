@@ -959,49 +959,39 @@ type PlaywrightMcpToolPlan =
   | { kind: "search_tool"; toolName: string }
   | {
       kind: "browser_workflow";
-      navigateToolName: string;
-      snapshotToolName: string;
+      navigateToolName: "browser_navigate";
+      snapshotToolName: "browser_snapshot";
+      waitForToolName?: "browser_wait_for";
     };
 
 function resolvePlaywrightMcpToolPlan(params: {
   requestedToolName: string;
   availableToolNames: string[];
 }): PlaywrightMcpToolPlan {
-  const available = params.availableToolNames.filter(
-    (name) => typeof name === "string" && name.trim(),
+  const available = new Set(
+    params.availableToolNames
+      .map((name) => (typeof name === "string" ? name.trim() : ""))
+      .filter(Boolean),
   );
-  if (available.includes(params.requestedToolName)) {
+
+  // Respect explicit configured/default tool when available.
+  if (available.has(params.requestedToolName)) {
     return { kind: "search_tool", toolName: params.requestedToolName };
   }
 
-  const webSearchTool = available.find((name) => /^(web[-_]?search|search[-_]?web)$/i.test(name));
-  if (webSearchTool) {
-    return { kind: "search_tool", toolName: webSearchTool };
-  }
-
-  const genericSearchTool = available.find((name) => /search/i.test(name));
-  if (genericSearchTool) {
-    return { kind: "search_tool", toolName: genericSearchTool };
-  }
-
-  const navigateToolName = available.find(
-    (name) => /(navigate|goto|open)/i.test(name) && /(browser|page|tab|playwright)/i.test(name),
-  );
-  const snapshotToolName = available.find(
-    (name) =>
-      /(snapshot|extract|content|read)/i.test(name) && /(browser|page|tab|playwright)/i.test(name),
-  );
-  if (navigateToolName && snapshotToolName) {
+  // Official Playwright MCP toolchain for page exploration: navigate -> optional wait -> snapshot.
+  if (available.has("browser_navigate") && available.has("browser_snapshot")) {
     return {
       kind: "browser_workflow",
-      navigateToolName,
-      snapshotToolName,
+      navigateToolName: "browser_navigate",
+      snapshotToolName: "browser_snapshot",
+      waitForToolName: available.has("browser_wait_for") ? "browser_wait_for" : undefined,
     };
   }
 
-  const availableLabel = available.length > 0 ? available.join(", ") : "(none)";
+  const availableLabel = available.size > 0 ? Array.from(available).join(", ") : "(none)";
   throw new Error(
-    `Playwright MCP cannot find a usable search tool/workflow. Requested tool: "${params.requestedToolName}". Available tools: ${availableLabel}`,
+    `Playwright MCP cannot find a usable tool plan. Expected "${params.requestedToolName}" or official workflow tools (browser_navigate + browser_snapshot). Available tools: ${availableLabel}`,
   );
 }
 
@@ -1219,6 +1209,19 @@ async function runPlaywrightMcpWebSearch(params: {
         timeout: params.timeoutSeconds * 1000,
       },
     );
+
+    if (toolPlan.waitForToolName) {
+      await client.callTool(
+        {
+          name: toolPlan.waitForToolName,
+          arguments: { time: 2 },
+        },
+        undefined,
+        {
+          timeout: params.timeoutSeconds * 1000,
+        },
+      );
+    }
 
     const workflowPayload = await callToolAndExtract(toolPlan.snapshotToolName, {});
     return {
