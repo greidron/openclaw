@@ -1071,72 +1071,111 @@ async function runPlaywrightMcpWebSearch(params: {
   dateBefore?: string;
   timeoutSeconds: number;
 }): Promise<Record<string, unknown>> {
-  return withTrustedWebSearchEndpoint(
-    {
-      url: params.endpoint,
-      timeoutSeconds: params.timeoutSeconds,
-      init: {
-        method: "POST",
-        headers: {
-          Accept: "application/json, text/event-stream",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `openclaw-web-search-${Date.now()}`,
-          method: "tools/call",
-          params: {
-            name: params.toolName,
-            arguments: {
-              query: params.query,
-              count: params.count,
-              country: params.country,
-              language: params.language,
-              freshness: params.freshness,
-              date_after: params.dateAfter,
-              date_before: params.dateBefore,
-            },
+  type MpcRpcBody = {
+    error?: { code?: number; message?: string };
+    result?: {
+      structuredContent?: Record<string, unknown>;
+      content?: Array<{ type?: string; text?: string }>;
+    };
+  };
+
+  const postRpc = async (payload: Record<string, unknown>, sessionId?: string) =>
+    withTrustedWebSearchEndpoint(
+      {
+        url: params.endpoint,
+        timeoutSeconds: params.timeoutSeconds,
+        init: {
+          method: "POST",
+          headers: {
+            Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
           },
-        }),
+          body: JSON.stringify(payload),
+        },
+      },
+      async (res) => {
+        const nextSessionId =
+          res.headers.get("Mcp-Session-Id") || res.headers.get("mcp-session-id") || undefined;
+        if (!res.ok) {
+          const detailResult = await readResponseText(res, { maxBytes: 64_000 });
+          throw new Error(
+            `Playwright MCP error (${res.status}): ${detailResult.text || res.statusText}`,
+          );
+        }
+        const body = (await res.json()) as MpcRpcBody;
+        return { body, sessionId: nextSessionId ?? sessionId };
+      },
+    );
+
+  const initialize = await postRpc({
+    jsonrpc: "2.0",
+    id: `openclaw-mcp-init-${Date.now()}`,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: {
+        name: "openclaw-web-search",
+        version: "1.0.0",
       },
     },
-    async (res) => {
-      if (!res.ok) {
-        const detailResult = await readResponseText(res, { maxBytes: 64_000 });
-        throw new Error(
-          `Playwright MCP error (${res.status}): ${detailResult.text || res.statusText}`,
-        );
-      }
+  });
+  if (initialize.body.error) {
+    throw new Error(
+      `Playwright MCP initialize failed: ${initialize.body.error.message || "unknown error"}`,
+    );
+  }
 
-      const body = (await res.json()) as {
-        error?: { message?: string };
-        result?: {
-          structuredContent?: Record<string, unknown>;
-          content?: Array<{ type?: string; text?: string }>;
-        };
-      };
-
-      if (body.error) {
-        throw new Error(
-          `Playwright MCP tool call failed: ${body.error.message || "unknown error"}`,
-        );
-      }
-
-      const structured = body.result?.structuredContent;
-      if (structured && typeof structured === "object") {
-        return structured;
-      }
-
-      const textParts = (body.result?.content || [])
-        .filter((part) => part.type === "text" && typeof part.text === "string")
-        .map((part) => part.text || "")
-        .filter(Boolean);
-
-      return {
-        content: wrapWebContent(textParts.join("\n\n")),
-      };
+  await postRpc(
+    {
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+      params: {},
     },
+    initialize.sessionId,
   );
+
+  const toolCall = await postRpc(
+    {
+      jsonrpc: "2.0",
+      id: `openclaw-web-search-${Date.now()}`,
+      method: "tools/call",
+      params: {
+        name: params.toolName,
+        arguments: {
+          query: params.query,
+          count: params.count,
+          country: params.country,
+          language: params.language,
+          freshness: params.freshness,
+          date_after: params.dateAfter,
+          date_before: params.dateBefore,
+        },
+      },
+    },
+    initialize.sessionId,
+  );
+
+  if (toolCall.body.error) {
+    throw new Error(
+      `Playwright MCP tool call failed: ${toolCall.body.error.message || "unknown error"}`,
+    );
+  }
+
+  const structured = toolCall.body.result?.structuredContent;
+  if (structured && typeof structured === "object") {
+    return structured;
+  }
+
+  const textParts = (toolCall.body.result?.content || [])
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text || "")
+    .filter(Boolean);
+
+  return {
+    content: wrapWebContent(textParts.join("\n\n")),
+  };
 }
 
 function resolveSearchCount(value: unknown, fallback: number): number {
