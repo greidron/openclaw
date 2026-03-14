@@ -170,4 +170,26 @@ describe("resolveAccount", () => {
     expect(account.statusStickers?.processing).toEqual({ packageId: "1", stickerId: "2" });
     expect(account.statusStickers?.failed).toEqual({ packageId: "1", stickerId: "3" });
   });
+
+  it("applies contextual default status stickers when enabled without explicit refs", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            statusStickers: {
+              enabled: true,
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.statusStickers?.received).toEqual({ packageId: "4", stickerId: "260" });
+    expect(account.statusStickers?.processing).toEqual({
+      packageId: "546",
+      stickerId: "2980",
+    });
+    expect(account.statusStickers?.failed).toEqual({ packageId: "2", stickerId: "18" });
+  });
 });

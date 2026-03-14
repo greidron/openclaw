@@ -64,9 +64,9 @@ openclaw plugins install ./extensions/naverworks
 
       statusStickers: {
         enabled: true,
-        received: { packageId: "1", stickerId: "1" },
-        processing: { packageId: "1", stickerId: "2" },
-        failed: { packageId: "1", stickerId: "3" },
+        received: { packageId: "4", stickerId: "260" }, // Daily Life
+        processing: { packageId: "546", stickerId: "2980" }, // Moon: Salaryman Special
+        failed: { packageId: "2", stickerId: "18" }, // Brown & Cony
       },
     },
   },
@@ -93,6 +93,7 @@ openclaw plugins install ./extensions/naverworks
 - `autoThinking` (optional) can auto-inject `/think <level>` before each inbound text based on keyword rules. Use this when you want NAVER WORKS requests to dynamically steer reasoning effort without manual `/think` commands.
 - `autoThinking` precedence: explicit user `/think` wins (no auto-injection), then `highKeywords`, then `lowKeywords`, then `defaultLevel` fallback.
 - `statusStickers` (optional) can send sticker-based status feedback for `received`, `processing`, and `failed` stages. Each stage uses `{ packageId, stickerId }`.
+- If `statusStickers.enabled` is true but a stage sticker is omitted, OpenClaw uses contextual defaults based on NAVER WORKS sticker-list categories: `received`=`4/260` (Daily Life), `processing`=`546/2980` (Moon: Salaryman Special), `failed`=`2/18` (Brown & Cony).
 - Inbound audio attachments are downloaded to local media storage when reachable, so OpenClaw media-understanding/STT can transcribe voice messages for agents.
 - Text-to-speech style audio replies are supported when the agent returns remote `mediaUrl`/`mediaUrls` audio links. Local file paths (for example raw `/tts audio` temp paths) are not uploadable by NAVER WORKS and are skipped with a warning.
 - `strictBinding` defaults to `true`. When no binding matches, the plugin drops the event instead of falling back to the default agent.

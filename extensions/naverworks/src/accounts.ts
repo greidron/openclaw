@@ -1,6 +1,17 @@
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
 import type { NaverWorksAccount, NaverWorksStickerRef } from "./types.js";
 
+const DEFAULT_STATUS_STICKERS: Required<NonNullable<NaverWorksAccount["statusStickers"]>> = {
+  enabled: true,
+  // Based on NAVER WORKS sticker-list categories:
+  // - received: Daily Life (package 4)
+  // - processing: Moon: Salaryman Special (package 546)
+  // - failed: Brown & Cony (package 2)
+  received: { packageId: "4", stickerId: "260" },
+  processing: { packageId: "546", stickerId: "2980" },
+  failed: { packageId: "2", stickerId: "18" },
+};
+
 function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -137,12 +148,16 @@ export function resolveAccount(
         false,
       received:
         asStickerRef(accountStatusStickers.received) ??
-        asStickerRef(sectionStatusStickers.received),
+        asStickerRef(sectionStatusStickers.received) ??
+        DEFAULT_STATUS_STICKERS.received,
       processing:
         asStickerRef(accountStatusStickers.processing) ??
-        asStickerRef(sectionStatusStickers.processing),
+        asStickerRef(sectionStatusStickers.processing) ??
+        DEFAULT_STATUS_STICKERS.processing,
       failed:
-        asStickerRef(accountStatusStickers.failed) ?? asStickerRef(sectionStatusStickers.failed),
+        asStickerRef(accountStatusStickers.failed) ??
+        asStickerRef(sectionStatusStickers.failed) ??
+        DEFAULT_STATUS_STICKERS.failed,
     },
   };
 }
