@@ -1,3 +1,5 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Type } from "@sinclair/typebox";
 import { formatCliCommand } from "../../cli/command-format.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -1071,176 +1073,70 @@ async function runPlaywrightMcpWebSearch(params: {
   dateBefore?: string;
   timeoutSeconds: number;
 }): Promise<Record<string, unknown>> {
-  type MpcRpcBody = {
-    error?: { code?: number; message?: string };
-    result?: {
-      structuredContent?: Record<string, unknown>;
-      content?: Array<{ type?: string; text?: string }>;
-    };
-  };
+  const transport = new StreamableHTTPClientTransport(new URL(params.endpoint), {
+    requestInit: {
+      headers: {
+        Accept: "application/json, text/event-stream",
+      },
+    },
+  });
 
-  const parseMcpSsePayload = (raw: string): MpcRpcBody | undefined => {
-    const dataLines = raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice("data:".length).trim())
-      .filter((line) => line && line !== "[DONE]");
-    for (const candidate of dataLines) {
-      try {
-        return JSON.parse(candidate) as MpcRpcBody;
-      } catch {
-        // Keep scanning; some servers may send non-JSON keepalive events.
+  const client = new Client(
+    {
+      name: "openclaw-web-search",
+      version: "1.0.0",
+    },
+    { capabilities: {} },
+  );
+
+  try {
+    await client.connect(transport, {
+      timeout: params.timeoutSeconds * 1000,
+    });
+
+    const toolResult = await client.callTool(
+      {
+        name: params.toolName,
+        arguments: {
+          query: params.query,
+          count: params.count,
+          country: params.country,
+          language: params.language,
+          freshness: params.freshness,
+          date_after: params.dateAfter,
+          date_before: params.dateBefore,
+        },
+      },
+      undefined,
+      {
+        timeout: params.timeoutSeconds * 1000,
+      },
+    );
+
+    const structured = toolResult.structuredContent;
+    if (structured && typeof structured === "object" && !Array.isArray(structured)) {
+      return structured as Record<string, unknown>;
+    }
+
+    const textParts: string[] = [];
+    const contentParts = Array.isArray(toolResult.content) ? toolResult.content : [];
+    for (const part of contentParts) {
+      if (part.type === "text" && typeof part.text === "string") {
+        textParts.push(part.text);
       }
     }
-    return undefined;
-  };
 
-  const postRpc = async (payload: Record<string, unknown>, sessionId?: string) =>
-    withTrustedWebSearchEndpoint(
-      {
-        url: params.endpoint,
-        timeoutSeconds: params.timeoutSeconds,
-        init: {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/event-stream",
-            "Content-Type": "application/json",
-            ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-          },
-          body: JSON.stringify(payload),
-        },
-      },
-      async (res) => {
-        const nextSessionId =
-          res.headers.get("Mcp-Session-Id") || res.headers.get("mcp-session-id") || undefined;
-        if (!res.ok) {
-          const detailResult = await readResponseText(res, { maxBytes: 64_000 });
-          throw new Error(
-            `Playwright MCP error (${res.status}): ${detailResult.text || res.statusText}`,
-          );
-        }
-        const contentType = (res.headers.get("content-type") || "").toLowerCase();
-        const body = (() => {
-          if (res.status === 204) {
-            return Promise.resolve({} as MpcRpcBody);
-          }
-          if (contentType.includes("text/event-stream")) {
-            return res
-              .text()
-              .then((text) => parseMcpSsePayload(text))
-              .then((parsed) => {
-                if (!parsed) {
-                  throw new Error("Playwright MCP returned SSE without JSON data payload.");
-                }
-                return parsed;
-              });
-          }
-          return res
-            .text()
-            .then((text) => {
-              const trimmed = text.trim();
-              if (!trimmed) {
-                return {} as MpcRpcBody;
-              }
-              try {
-                return JSON.parse(trimmed) as MpcRpcBody;
-              } catch {
-                throw new Error(
-                  `Playwright MCP returned non-JSON response: ${trimmed.slice(0, 200)}`,
-                );
-              }
-            })
-            .catch((err) => {
-              throw new Error(`Playwright MCP response parse failed: ${String(err)}`);
-            });
-        })();
-        const parsedBody = await body;
-        return { body: parsedBody, sessionId: nextSessionId ?? sessionId };
-      },
-    );
-
-  const initializeSession = async () => {
-    const initialize = await postRpc({
-      jsonrpc: "2.0",
-      id: `openclaw-mcp-init-${Date.now()}`,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: {
-          name: "openclaw-web-search",
-          version: "1.0.0",
-        },
-      },
+    return {
+      content: wrapWebContent(textParts.join("\n\n")),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Playwright MCP tool call failed: ${message}`, {
+      cause: error,
     });
-    if (initialize.body.error) {
-      throw new Error(
-        `Playwright MCP initialize failed: ${initialize.body.error.message || "unknown error"}`,
-      );
-    }
-
-    await postRpc(
-      {
-        jsonrpc: "2.0",
-        method: "notifications/initialized",
-        params: {},
-      },
-      initialize.sessionId,
-    );
-    return initialize.sessionId;
-  };
-
-  const sessionId = await initializeSession();
-
-  const callTool = async (currentSessionId?: string) =>
-    postRpc(
-      {
-        jsonrpc: "2.0",
-        id: `openclaw-web-search-${Date.now()}`,
-        method: "tools/call",
-        params: {
-          name: params.toolName,
-          arguments: {
-            query: params.query,
-            count: params.count,
-            country: params.country,
-            language: params.language,
-            freshness: params.freshness,
-            date_after: params.dateAfter,
-            date_before: params.dateBefore,
-          },
-        },
-      },
-      currentSessionId,
-    );
-
-  let toolCall = await callTool(sessionId);
-  if (toolCall.body.error && /not initialized/i.test(toolCall.body.error.message || "")) {
-    // Some MCP servers drop/rotate session affinity. Reinitialize once and retry tools/call.
-    const retriedSessionId = await initializeSession();
-    toolCall = await callTool(retriedSessionId);
+  } finally {
+    await transport.close().catch(() => undefined);
   }
-
-  if (toolCall.body.error) {
-    throw new Error(
-      `Playwright MCP tool call failed: ${toolCall.body.error.message || "unknown error"}`,
-    );
-  }
-
-  const structured = toolCall.body.result?.structuredContent;
-  if (structured && typeof structured === "object") {
-    return structured;
-  }
-
-  const textParts = (toolCall.body.result?.content || [])
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text || "")
-    .filter(Boolean);
-
-  return {
-    content: wrapWebContent(textParts.join("\n\n")),
-  };
 }
 
 function resolveSearchCount(value: unknown, fallback: number): number {
