@@ -1079,6 +1079,23 @@ async function runPlaywrightMcpWebSearch(params: {
     };
   };
 
+  const parseMcpSsePayload = (raw: string): MpcRpcBody | undefined => {
+    const dataLines = raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice("data:".length).trim())
+      .filter((line) => line && line !== "[DONE]");
+    for (const candidate of dataLines) {
+      try {
+        return JSON.parse(candidate) as MpcRpcBody;
+      } catch {
+        // Keep scanning; some servers may send non-JSON keepalive events.
+      }
+    }
+    return undefined;
+  };
+
   const postRpc = async (payload: Record<string, unknown>, sessionId?: string) =>
     withTrustedWebSearchEndpoint(
       {
@@ -1103,59 +1120,87 @@ async function runPlaywrightMcpWebSearch(params: {
             `Playwright MCP error (${res.status}): ${detailResult.text || res.statusText}`,
           );
         }
-        const body = (await res.json()) as MpcRpcBody;
-        return { body, sessionId: nextSessionId ?? sessionId };
+        const contentType = (res.headers.get("content-type") || "").toLowerCase();
+        const body = (() => {
+          if (contentType.includes("text/event-stream")) {
+            return res
+              .text()
+              .then((text) => parseMcpSsePayload(text))
+              .then((parsed) => {
+                if (!parsed) {
+                  throw new Error("Playwright MCP returned SSE without JSON data payload.");
+                }
+                return parsed;
+              });
+          }
+          return res.json() as Promise<MpcRpcBody>;
+        })();
+        const parsedBody = await body;
+        return { body: parsedBody, sessionId: nextSessionId ?? sessionId };
       },
     );
 
-  const initialize = await postRpc({
-    jsonrpc: "2.0",
-    id: `openclaw-mcp-init-${Date.now()}`,
-    method: "initialize",
-    params: {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: {
-        name: "openclaw-web-search",
-        version: "1.0.0",
-      },
-    },
-  });
-  if (initialize.body.error) {
-    throw new Error(
-      `Playwright MCP initialize failed: ${initialize.body.error.message || "unknown error"}`,
-    );
-  }
-
-  await postRpc(
-    {
+  const initializeSession = async () => {
+    const initialize = await postRpc({
       jsonrpc: "2.0",
-      method: "notifications/initialized",
-      params: {},
-    },
-    initialize.sessionId,
-  );
-
-  const toolCall = await postRpc(
-    {
-      jsonrpc: "2.0",
-      id: `openclaw-web-search-${Date.now()}`,
-      method: "tools/call",
+      id: `openclaw-mcp-init-${Date.now()}`,
+      method: "initialize",
       params: {
-        name: params.toolName,
-        arguments: {
-          query: params.query,
-          count: params.count,
-          country: params.country,
-          language: params.language,
-          freshness: params.freshness,
-          date_after: params.dateAfter,
-          date_before: params.dateBefore,
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: {
+          name: "openclaw-web-search",
+          version: "1.0.0",
         },
       },
-    },
-    initialize.sessionId,
-  );
+    });
+    if (initialize.body.error) {
+      throw new Error(
+        `Playwright MCP initialize failed: ${initialize.body.error.message || "unknown error"}`,
+      );
+    }
+
+    await postRpc(
+      {
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {},
+      },
+      initialize.sessionId,
+    );
+    return initialize.sessionId;
+  };
+
+  const sessionId = await initializeSession();
+
+  const callTool = async (currentSessionId?: string) =>
+    postRpc(
+      {
+        jsonrpc: "2.0",
+        id: `openclaw-web-search-${Date.now()}`,
+        method: "tools/call",
+        params: {
+          name: params.toolName,
+          arguments: {
+            query: params.query,
+            count: params.count,
+            country: params.country,
+            language: params.language,
+            freshness: params.freshness,
+            date_after: params.dateAfter,
+            date_before: params.dateBefore,
+          },
+        },
+      },
+      currentSessionId,
+    );
+
+  let toolCall = await callTool(sessionId);
+  if (toolCall.body.error && /not initialized/i.test(toolCall.body.error.message || "")) {
+    // Some MCP servers drop/rotate session affinity. Reinitialize once and retry tools/call.
+    const retriedSessionId = await initializeSession();
+    toolCall = await callTool(retriedSessionId);
+  }
 
   if (toolCall.body.error) {
     throw new Error(
