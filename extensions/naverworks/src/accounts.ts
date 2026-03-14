@@ -1,5 +1,5 @@
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
-import type { NaverWorksAccount } from "./types.js";
+import type { NaverWorksAccount, NaverWorksStickerRef } from "./types.js";
 
 function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -12,6 +12,28 @@ function asStringList(value: unknown): string[] {
   return value
     .map((entry) => (typeof entry === "string" ? entry.trim() : String(entry ?? "").trim()))
     .filter((entry) => entry.length > 0);
+}
+
+function asThinkingLevel(value: unknown): "low" | "medium" | "high" | undefined {
+  const level = asString(value)?.toLowerCase();
+  if (!level) return undefined;
+  if (level === "low" || level === "medium" || level === "high") {
+    return level;
+  }
+  return undefined;
+}
+
+function asStickerRef(value: unknown): NaverWorksStickerRef | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const packageId = asString(record.packageId);
+  const stickerId = asString(record.stickerId);
+  if (!packageId || !stickerId) {
+    return undefined;
+  }
+  return { packageId, stickerId };
 }
 
 function normalizePrivateKey(value: string | undefined): string | undefined {
@@ -37,6 +59,10 @@ export function resolveAccount(
   const accounts = (section.accounts ?? {}) as Record<string, unknown>;
   const accountCfg = (accounts[resolvedId] ?? {}) as Record<string, unknown>;
 
+  const sectionAutoThinking = (section.autoThinking ?? {}) as Record<string, unknown>;
+  const accountAutoThinking = (accountCfg.autoThinking ?? {}) as Record<string, unknown>;
+  const sectionStatusStickers = (section.statusStickers ?? {}) as Record<string, unknown>;
+  const accountStatusStickers = (accountCfg.statusStickers ?? {}) as Record<string, unknown>;
   const dmPolicy =
     (asString(accountCfg.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
     (asString(section.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
@@ -87,5 +113,36 @@ export function resolveAccount(
       (asString(accountCfg.markdownTheme) as NaverWorksAccount["markdownTheme"] | undefined) ??
       (asString(section.markdownTheme) as NaverWorksAccount["markdownTheme"] | undefined) ??
       "auto",
+    autoThinking: {
+      enabled:
+        (accountAutoThinking.enabled as boolean | undefined) ??
+        (sectionAutoThinking.enabled as boolean | undefined) ??
+        false,
+      defaultLevel:
+        asThinkingLevel(accountAutoThinking.defaultLevel) ??
+        asThinkingLevel(sectionAutoThinking.defaultLevel),
+      lowKeywords: [
+        ...asStringList(sectionAutoThinking.lowKeywords),
+        ...asStringList(accountAutoThinking.lowKeywords),
+      ],
+      highKeywords: [
+        ...asStringList(sectionAutoThinking.highKeywords),
+        ...asStringList(accountAutoThinking.highKeywords),
+      ],
+    },
+    statusStickers: {
+      enabled:
+        (accountStatusStickers.enabled as boolean | undefined) ??
+        (sectionStatusStickers.enabled as boolean | undefined) ??
+        false,
+      received:
+        asStickerRef(accountStatusStickers.received) ??
+        asStickerRef(sectionStatusStickers.received),
+      processing:
+        asStickerRef(accountStatusStickers.processing) ??
+        asStickerRef(sectionStatusStickers.processing),
+      failed:
+        asStickerRef(accountStatusStickers.failed) ?? asStickerRef(sectionStatusStickers.failed),
+    },
   };
 }
