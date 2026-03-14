@@ -955,6 +955,33 @@ function resolvePlaywrightMcpServerUrl(config?: PlaywrightMcpConfig): string | u
   return fromEnv || undefined;
 }
 
+function resolvePlaywrightMcpToolName(params: {
+  requestedToolName: string;
+  availableToolNames: string[];
+}): string {
+  const available = params.availableToolNames.filter(
+    (name) => typeof name === "string" && name.trim(),
+  );
+  if (available.includes(params.requestedToolName)) {
+    return params.requestedToolName;
+  }
+
+  const webSearchTool = available.find((name) => /^(web[-_]?search|search[-_]?web)$/i.test(name));
+  if (webSearchTool) {
+    return webSearchTool;
+  }
+
+  const genericSearchTool = available.find((name) => /search/i.test(name));
+  if (genericSearchTool) {
+    return genericSearchTool;
+  }
+
+  const availableLabel = available.length > 0 ? available.join(", ") : "(none)";
+  throw new Error(
+    `Playwright MCP tool "${params.requestedToolName}" not found. Available tools: ${availableLabel}`,
+  );
+}
+
 async function withTrustedWebSearchEndpoint<T>(
   params: {
     url: string;
@@ -1072,7 +1099,7 @@ async function runPlaywrightMcpWebSearch(params: {
   dateAfter?: string;
   dateBefore?: string;
   timeoutSeconds: number;
-}): Promise<Record<string, unknown>> {
+}): Promise<{ toolName: string; payload: Record<string, unknown> }> {
   const transport = new StreamableHTTPClientTransport(new URL(params.endpoint), {
     requestInit: {
       headers: {
@@ -1094,9 +1121,25 @@ async function runPlaywrightMcpWebSearch(params: {
       timeout: params.timeoutSeconds * 1000,
     });
 
+    const listedTools = await client.listTools(undefined, {
+      timeout: params.timeoutSeconds * 1000,
+    });
+    const resolvedToolName = resolvePlaywrightMcpToolName({
+      requestedToolName: params.toolName,
+      availableToolNames: (listedTools.tools || [])
+        .map((tool) => (typeof tool?.name === "string" ? tool.name.trim() : ""))
+        .filter(Boolean),
+    });
+
+    if (resolvedToolName !== params.toolName) {
+      logVerbose(
+        `Web Search: Playwright MCP tool "${params.toolName}" not available; using "${resolvedToolName}".`,
+      );
+    }
+
     const toolResult = await client.callTool(
       {
-        name: params.toolName,
+        name: resolvedToolName,
         arguments: {
           query: params.query,
           count: params.count,
@@ -1115,7 +1158,7 @@ async function runPlaywrightMcpWebSearch(params: {
 
     const structured = toolResult.structuredContent;
     if (structured && typeof structured === "object" && !Array.isArray(structured)) {
-      return structured as Record<string, unknown>;
+      return { toolName: resolvedToolName, payload: structured as Record<string, unknown> };
     }
 
     const textParts: string[] = [];
@@ -1127,7 +1170,10 @@ async function runPlaywrightMcpWebSearch(params: {
     }
 
     return {
-      content: wrapWebContent(textParts.join("\n\n")),
+      toolName: resolvedToolName,
+      payload: {
+        content: wrapWebContent(textParts.join("\n\n")),
+      },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1911,7 +1957,7 @@ async function runWebSearch(params: {
     const payload = {
       query: params.query,
       provider: params.provider,
-      toolName: DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME,
+      toolName: mcpResult.toolName,
       tookMs: Date.now() - start,
       externalContent: {
         untrusted: true,
@@ -1919,7 +1965,7 @@ async function runWebSearch(params: {
         provider: params.provider,
         wrapped: true,
       },
-      ...mcpResult,
+      ...mcpResult.payload,
     };
     writeCache(SEARCH_CACHE, cacheKey, payload, params.cacheTtlMs);
     return payload;
@@ -2375,6 +2421,7 @@ export const __testing = {
   resolveGrokInlineCitations,
   extractGrokContent,
   resolvePlaywrightMcpServerUrl,
+  resolvePlaywrightMcpToolName,
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,

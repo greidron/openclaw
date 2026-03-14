@@ -22,6 +22,7 @@ const {
   resolveKimiModel,
   resolveKimiBaseUrl,
   resolvePlaywrightMcpServerUrl,
+  resolvePlaywrightMcpToolName,
   extractKimiCitations,
   resolveBraveMode,
   mapBraveLlmContextResults,
@@ -214,6 +215,30 @@ describe("web_search playwright-mcp config resolution", () => {
     withEnv({ PLAYWRIGHT_MCP_SERVER_URL: "http://localhost:9000/mcp" }, () => {
       expect(resolvePlaywrightMcpServerUrl({})).toBe("http://localhost:9000/mcp");
     });
+  });
+
+  it("selects best available MCP tool name", () => {
+    expect(
+      resolvePlaywrightMcpToolName({
+        requestedToolName: "web_search",
+        availableToolNames: ["search_web", "other"],
+      }),
+    ).toBe("search_web");
+    expect(
+      resolvePlaywrightMcpToolName({
+        requestedToolName: "web_search",
+        availableToolNames: ["find_search_results", "other"],
+      }),
+    ).toBe("find_search_results");
+  });
+
+  it("throws a clear error when no search-like MCP tool exists", () => {
+    expect(() =>
+      resolvePlaywrightMcpToolName({
+        requestedToolName: "web_search",
+        availableToolNames: ["navigate", "click"],
+      }),
+    ).toThrow('Playwright MCP tool "web_search" not found. Available tools: navigate, click');
   });
 });
 
