@@ -441,8 +441,8 @@ export type ToolsConfig = {
     search?: {
       /** Enable web search tool (default: true when API key is present). */
       enabled?: boolean;
-      /** Search provider ("brave", "gemini", "grok", "kimi", or "perplexity"). */
-      provider?: "brave" | "gemini" | "grok" | "kimi" | "perplexity";
+      /** Search provider ("brave", "gemini", "grok", "kimi", "perplexity", or "playwright-mcp"). */
+      provider?: "brave" | "gemini" | "grok" | "kimi" | "perplexity" | "playwright-mcp";
       /** Brave Search API key (optional; defaults to BRAVE_API_KEY env var). */
       apiKey?: SecretInput;
       /** Default search results count (1-10). */
@@ -489,6 +489,11 @@ export type ToolsConfig = {
         baseUrl?: string;
         /** @deprecated Legacy Sonar/OpenRouter field. Ignored by Search API. */
         model?: string;
+      };
+      /** Playwright MCP server configuration (used when provider="playwright-mcp"). */
+      playwrightMcp?: {
+        /** MCP server HTTP endpoint URL (for example, http://127.0.0.1:8788/mcp). */
+        serverUrl?: string;
       };
     };
     fetch?: {

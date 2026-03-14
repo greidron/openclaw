@@ -21,6 +21,7 @@ const {
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,
+  resolvePlaywrightMcpServerUrl,
   extractKimiCitations,
   resolveBraveMode,
   mapBraveLlmContextResults,
@@ -196,6 +197,23 @@ describe("web_search date normalization", () => {
   it("rejects invalid ISO dates", () => {
     expect(isoToPerplexityDate("1/15/2024")).toBeUndefined();
     expect(isoToPerplexityDate("invalid")).toBeUndefined();
+  });
+});
+
+describe("web_search playwright-mcp config resolution", () => {
+  it("resolves explicit provider value", () => {
+    expect(__testing.resolveSearchProvider({ provider: "playwright-mcp" } as never)).toBe(
+      "playwright-mcp",
+    );
+  });
+
+  it("reads MCP endpoint from config or env", () => {
+    expect(resolvePlaywrightMcpServerUrl({ serverUrl: "http://127.0.0.1:8788/mcp" })).toBe(
+      "http://127.0.0.1:8788/mcp",
+    );
+    withEnv({ PLAYWRIGHT_MCP_SERVER_URL: "http://localhost:9000/mcp" }, () => {
+      expect(resolvePlaywrightMcpServerUrl({})).toBe("http://localhost:9000/mcp");
+    });
   });
 });
 

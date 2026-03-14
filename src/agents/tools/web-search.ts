@@ -22,7 +22,14 @@ import {
   writeCache,
 } from "./web-shared.js";
 
-const SEARCH_PROVIDERS = ["brave", "gemini", "grok", "kimi", "perplexity"] as const;
+const SEARCH_PROVIDERS = [
+  "brave",
+  "gemini",
+  "grok",
+  "kimi",
+  "perplexity",
+  "playwright-mcp",
+] as const;
 const DEFAULT_SEARCH_COUNT = 5;
 const MAX_SEARCH_COUNT = 10;
 
@@ -39,6 +46,7 @@ const XAI_API_ENDPOINT = "https://api.x.ai/v1/responses";
 const DEFAULT_GROK_MODEL = "grok-4-1-fast";
 const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/v1";
 const DEFAULT_KIMI_MODEL = "moonshot-v1-128k";
+const DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME = "web_search";
 const KIMI_WEB_SEARCH_TOOL = {
   type: "builtin_function",
   function: { name: "$web_search" },
@@ -333,6 +341,10 @@ type KimiConfig = {
   model?: string;
 };
 
+type PlaywrightMcpConfig = {
+  serverUrl?: string;
+};
+
 type GrokSearchResponse = {
   output?: Array<{
     type?: string;
@@ -620,6 +632,9 @@ function resolveSearchProvider(search?: WebSearchConfig): (typeof SEARCH_PROVIDE
   }
   if (raw === "perplexity") {
     return "perplexity";
+  }
+  if (raw === "playwright-mcp") {
+    return "playwright-mcp";
   }
 
   // Auto-detect provider from available API keys (alphabetical order)
@@ -915,6 +930,29 @@ function resolveGeminiModel(gemini?: GeminiConfig): string {
   return fromConfig || DEFAULT_GEMINI_MODEL;
 }
 
+function resolvePlaywrightMcpConfig(search?: WebSearchConfig): PlaywrightMcpConfig {
+  if (!search || typeof search !== "object") {
+    return {};
+  }
+  const config = "playwrightMcp" in search ? search.playwrightMcp : undefined;
+  if (!config || typeof config !== "object") {
+    return {};
+  }
+  return config as PlaywrightMcpConfig;
+}
+
+function resolvePlaywrightMcpServerUrl(config?: PlaywrightMcpConfig): string | undefined {
+  const fromConfig =
+    config && "serverUrl" in config && typeof config.serverUrl === "string"
+      ? config.serverUrl.trim()
+      : "";
+  if (fromConfig) {
+    return fromConfig;
+  }
+  const fromEnv = normalizeSecretInput(process.env.PLAYWRIGHT_MCP_SERVER_URL);
+  return fromEnv || undefined;
+}
+
 async function withTrustedWebSearchEndpoint<T>(
   params: {
     url: string;
@@ -1017,6 +1055,85 @@ async function runGeminiSearch(params: {
       }
 
       return { content, citations };
+    },
+  );
+}
+
+async function runPlaywrightMcpWebSearch(params: {
+  endpoint: string;
+  toolName: string;
+  query: string;
+  count: number;
+  country?: string;
+  language?: string;
+  freshness?: string;
+  dateAfter?: string;
+  dateBefore?: string;
+  timeoutSeconds: number;
+}): Promise<Record<string, unknown>> {
+  return withTrustedWebSearchEndpoint(
+    {
+      url: params.endpoint,
+      timeoutSeconds: params.timeoutSeconds,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: `openclaw-web-search-${Date.now()}`,
+          method: "tools/call",
+          params: {
+            name: params.toolName,
+            arguments: {
+              query: params.query,
+              count: params.count,
+              country: params.country,
+              language: params.language,
+              freshness: params.freshness,
+              date_after: params.dateAfter,
+              date_before: params.dateBefore,
+            },
+          },
+        }),
+      },
+    },
+    async (res) => {
+      if (!res.ok) {
+        const detailResult = await readResponseText(res, { maxBytes: 64_000 });
+        throw new Error(
+          `Playwright MCP error (${res.status}): ${detailResult.text || res.statusText}`,
+        );
+      }
+
+      const body = (await res.json()) as {
+        error?: { message?: string };
+        result?: {
+          structuredContent?: Record<string, unknown>;
+          content?: Array<{ type?: string; text?: string }>;
+        };
+      };
+
+      if (body.error) {
+        throw new Error(
+          `Playwright MCP tool call failed: ${body.error.message || "unknown error"}`,
+        );
+      }
+
+      const structured = body.result?.structuredContent;
+      if (structured && typeof structured === "object") {
+        return structured;
+      }
+
+      const textParts = (body.result?.content || [])
+        .filter((part) => part.type === "text" && typeof part.text === "string")
+        .map((part) => part.text || "")
+        .filter(Boolean);
+
+      return {
+        content: wrapWebContent(textParts.join("\n\n")),
+      };
     },
   );
 }
@@ -1603,6 +1720,7 @@ async function runWebSearch(params: {
   kimiBaseUrl?: string;
   kimiModel?: string;
   braveMode?: "web" | "llm-context";
+  playwrightMcpServerUrl?: string;
 }): Promise<Record<string, unknown>> {
   const effectiveBraveMode = params.braveMode ?? "web";
   const providerSpecificKey =
@@ -1769,6 +1887,43 @@ async function runWebSearch(params: {
     return payload;
   }
 
+  if (params.provider === "playwright-mcp") {
+    const endpoint = params.playwrightMcpServerUrl?.trim();
+    if (!endpoint) {
+      throw new Error(
+        "Playwright MCP provider requires tools.web.search.playwrightMcp.serverUrl (or PLAYWRIGHT_MCP_SERVER_URL).",
+      );
+    }
+    const mcpResult = await runPlaywrightMcpWebSearch({
+      endpoint,
+      toolName: DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME,
+      query: params.query,
+      count: params.count,
+      country: params.country,
+      language: params.language,
+      freshness: params.freshness,
+      dateAfter: params.dateAfter,
+      dateBefore: params.dateBefore,
+      timeoutSeconds: params.timeoutSeconds,
+    });
+
+    const payload = {
+      query: params.query,
+      provider: params.provider,
+      toolName: DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME,
+      tookMs: Date.now() - start,
+      externalContent: {
+        untrusted: true,
+        source: "web_search",
+        provider: params.provider,
+        wrapped: true,
+      },
+      ...mcpResult,
+    };
+    writeCache(SEARCH_CACHE, cacheKey, payload, params.cacheTtlMs);
+    return payload;
+  }
+
   if (params.provider !== "brave") {
     throw new Error("Unsupported web search provider.");
   }
@@ -1909,6 +2064,7 @@ export function createWebSearchTool(options?: {
   const grokConfig = resolveGrokConfig(search);
   const geminiConfig = resolveGeminiConfig(search);
   const kimiConfig = resolveKimiConfig(search);
+  const playwrightMcpConfig = resolvePlaywrightMcpConfig(search);
   const braveConfig = resolveBraveConfig(search);
   const braveMode = resolveBraveMode(braveConfig);
 
@@ -1921,11 +2077,13 @@ export function createWebSearchTool(options?: {
         ? "Search the web using xAI Grok. Returns AI-synthesized answers with citations from real-time web search."
         : provider === "kimi"
           ? "Search the web using Kimi by Moonshot. Returns AI-synthesized answers with citations from native $web_search."
-          : provider === "gemini"
-            ? "Search the web using Gemini with Google Search grounding. Returns AI-synthesized answers with citations from Google Search."
-            : braveMode === "llm-context"
-              ? "Search the web using Brave Search LLM Context API. Returns pre-extracted page content (text chunks, tables, code blocks) optimized for LLM grounding."
-              : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
+          : provider === "playwright-mcp"
+            ? "Search the web by calling a remote MCP tool (for example, Playwright MCP) over HTTP tools/call."
+            : provider === "gemini"
+              ? "Search the web using Gemini with Google Search grounding. Returns AI-synthesized answers with citations from Google Search."
+              : braveMode === "llm-context"
+                ? "Search the web using Brave Search LLM Context API. Returns pre-extracted page content (text chunks, tables, code blocks) optimized for LLM grounding."
+                : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
 
   return {
     label: "Web Search",
@@ -1949,7 +2107,9 @@ export function createWebSearchTool(options?: {
               ? resolveKimiApiKey(kimiConfig)
               : provider === "gemini"
                 ? resolveGeminiApiKey(geminiConfig)
-                : resolveSearchApiKey(search);
+                : provider === "playwright-mcp"
+                  ? "playwright-mcp"
+                  : resolveSearchApiKey(search);
 
       if (!apiKey) {
         return jsonResult(missingSearchKeyPayload(provider));
@@ -2186,6 +2346,7 @@ export function createWebSearchTool(options?: {
         kimiBaseUrl: resolveKimiBaseUrl(kimiConfig),
         kimiModel: resolveKimiModel(kimiConfig),
         braveMode,
+        playwrightMcpServerUrl: resolvePlaywrightMcpServerUrl(playwrightMcpConfig),
       });
       return jsonResult(result);
     },
@@ -2212,6 +2373,7 @@ export const __testing = {
   resolveGrokModel,
   resolveGrokInlineCitations,
   extractGrokContent,
+  resolvePlaywrightMcpServerUrl,
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,

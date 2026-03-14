@@ -10,7 +10,7 @@ import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import type { SecretInputMode } from "./onboard-types.js";
 
-export type SearchProvider = "brave" | "gemini" | "grok" | "kimi" | "perplexity";
+export type SearchProvider = "brave" | "gemini" | "grok" | "kimi" | "perplexity" | "playwright-mcp";
 
 type SearchProviderEntry = {
   value: SearchProvider;
@@ -55,6 +55,14 @@ export const SEARCH_PROVIDER_OPTIONS: readonly SearchProviderEntry[] = [
     signupUrl: "https://platform.moonshot.cn/",
   },
   {
+    value: "playwright-mcp",
+    label: "Playwright MCP",
+    hint: "Use a remote MCP tools/call endpoint",
+    envKeys: ["PLAYWRIGHT_MCP_SERVER_URL"],
+    placeholder: "http://127.0.0.1:8788/mcp",
+    signupUrl: "https://docs.openclaw.ai/tools/web",
+  },
+  {
     value: "perplexity",
     label: "Perplexity Search",
     hint: "Structured results · domain/country/language/time filters",
@@ -81,6 +89,8 @@ function rawKeyValue(config: OpenClawConfig, provider: SearchProvider): unknown 
       return search?.kimi?.apiKey;
     case "perplexity":
       return search?.perplexity?.apiKey;
+    case "playwright-mcp":
+      return undefined;
   }
 }
 
@@ -143,6 +153,8 @@ export function applySearchKey(
       break;
     case "perplexity":
       search.perplexity = { ...search.perplexity, apiKey: key };
+      break;
+    case "playwright-mcp":
       break;
   }
   return {
@@ -244,6 +256,35 @@ export async function setupSearch(
   }
 
   const entry = SEARCH_PROVIDER_OPTIONS.find((e) => e.value === choice)!;
+  if (choice === "playwright-mcp") {
+    const existingUrl = config.tools?.web?.search?.playwrightMcp?.serverUrl?.trim();
+    const urlInput = await prompter.text({
+      message: existingUrl
+        ? "Playwright MCP server URL (leave blank to keep current)"
+        : "Playwright MCP server URL",
+      placeholder: existingUrl || "http://127.0.0.1:8788/mcp",
+    });
+    const serverUrl = urlInput?.trim() || existingUrl;
+    return preserveDisabledState(config, {
+      ...config,
+      tools: {
+        ...config.tools,
+        web: {
+          ...config.tools?.web,
+          search: {
+            ...config.tools?.web?.search,
+            provider: choice,
+            enabled: true,
+            playwrightMcp: {
+              ...config.tools?.web?.search?.playwrightMcp,
+              ...(serverUrl ? { serverUrl } : {}),
+            },
+          },
+        },
+      },
+    });
+  }
+
   const existingKey = resolveExistingKey(config, choice);
   const keyConfigured = hasExistingKey(config, choice);
   const envAvailable = hasKeyInEnv(entry);
