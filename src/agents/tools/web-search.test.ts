@@ -22,7 +22,7 @@ const {
   resolveKimiModel,
   resolveKimiBaseUrl,
   resolvePlaywrightMcpServerUrl,
-  resolvePlaywrightMcpToolName,
+  resolvePlaywrightMcpToolPlan,
   extractKimiCitations,
   resolveBraveMode,
   mapBraveLlmContextResults,
@@ -219,26 +219,41 @@ describe("web_search playwright-mcp config resolution", () => {
 
   it("selects best available MCP tool name", () => {
     expect(
-      resolvePlaywrightMcpToolName({
+      resolvePlaywrightMcpToolPlan({
         requestedToolName: "web_search",
         availableToolNames: ["search_web", "other"],
       }),
-    ).toBe("search_web");
+    ).toEqual({ kind: "search_tool", toolName: "search_web" });
     expect(
-      resolvePlaywrightMcpToolName({
+      resolvePlaywrightMcpToolPlan({
         requestedToolName: "web_search",
         availableToolNames: ["find_search_results", "other"],
       }),
-    ).toBe("find_search_results");
+    ).toEqual({ kind: "search_tool", toolName: "find_search_results" });
   });
 
   it("throws a clear error when no search-like MCP tool exists", () => {
     expect(() =>
-      resolvePlaywrightMcpToolName({
+      resolvePlaywrightMcpToolPlan({
         requestedToolName: "web_search",
         availableToolNames: ["navigate", "click"],
       }),
-    ).toThrow('Playwright MCP tool "web_search" not found. Available tools: navigate, click');
+    ).toThrow(
+      'Playwright MCP cannot find a usable search tool/workflow. Requested tool: "web_search". Available tools: navigate, click',
+    );
+  });
+
+  it("falls back to browser workflow when navigate + snapshot tools are available", () => {
+    expect(
+      resolvePlaywrightMcpToolPlan({
+        requestedToolName: "web_search",
+        availableToolNames: ["browser_navigate", "browser_snapshot", "browser_click"],
+      }),
+    ).toEqual({
+      kind: "browser_workflow",
+      navigateToolName: "browser_navigate",
+      snapshotToolName: "browser_snapshot",
+    });
   });
 });
 

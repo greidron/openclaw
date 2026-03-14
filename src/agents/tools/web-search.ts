@@ -955,30 +955,53 @@ function resolvePlaywrightMcpServerUrl(config?: PlaywrightMcpConfig): string | u
   return fromEnv || undefined;
 }
 
-function resolvePlaywrightMcpToolName(params: {
+type PlaywrightMcpToolPlan =
+  | { kind: "search_tool"; toolName: string }
+  | {
+      kind: "browser_workflow";
+      navigateToolName: string;
+      snapshotToolName: string;
+    };
+
+function resolvePlaywrightMcpToolPlan(params: {
   requestedToolName: string;
   availableToolNames: string[];
-}): string {
+}): PlaywrightMcpToolPlan {
   const available = params.availableToolNames.filter(
     (name) => typeof name === "string" && name.trim(),
   );
   if (available.includes(params.requestedToolName)) {
-    return params.requestedToolName;
+    return { kind: "search_tool", toolName: params.requestedToolName };
   }
 
   const webSearchTool = available.find((name) => /^(web[-_]?search|search[-_]?web)$/i.test(name));
   if (webSearchTool) {
-    return webSearchTool;
+    return { kind: "search_tool", toolName: webSearchTool };
   }
 
   const genericSearchTool = available.find((name) => /search/i.test(name));
   if (genericSearchTool) {
-    return genericSearchTool;
+    return { kind: "search_tool", toolName: genericSearchTool };
+  }
+
+  const navigateToolName = available.find(
+    (name) => /(navigate|goto|open)/i.test(name) && /(browser|page|tab|playwright)/i.test(name),
+  );
+  const snapshotToolName = available.find(
+    (name) =>
+      /(snapshot|extract|content|read)/i.test(name) && /(browser|page|tab|playwright)/i.test(name),
+  );
+  if (navigateToolName && snapshotToolName) {
+    return {
+      kind: "browser_workflow",
+      navigateToolName,
+      snapshotToolName,
+    };
   }
 
   const availableLabel = available.length > 0 ? available.join(", ") : "(none)";
   throw new Error(
-    `Playwright MCP tool "${params.requestedToolName}" not found. Available tools: ${availableLabel}`,
+    `Playwright MCP cannot find a usable search tool/workflow. Requested tool: "${params.requestedToolName}". Available tools: ${availableLabel}`,
   );
 }
 
@@ -1099,7 +1122,11 @@ async function runPlaywrightMcpWebSearch(params: {
   dateAfter?: string;
   dateBefore?: string;
   timeoutSeconds: number;
-}): Promise<{ toolName: string; payload: Record<string, unknown> }> {
+}): Promise<{
+  toolName: string;
+  payload: Record<string, unknown>;
+  strategy: "search_tool" | "browser_workflow";
+}> {
   const transport = new StreamableHTTPClientTransport(new URL(params.endpoint), {
     requestInit: {
       headers: {
@@ -1124,30 +1151,67 @@ async function runPlaywrightMcpWebSearch(params: {
     const listedTools = await client.listTools(undefined, {
       timeout: params.timeoutSeconds * 1000,
     });
-    const resolvedToolName = resolvePlaywrightMcpToolName({
+    const toolPlan = resolvePlaywrightMcpToolPlan({
       requestedToolName: params.toolName,
       availableToolNames: (listedTools.tools || [])
         .map((tool) => (typeof tool?.name === "string" ? tool.name.trim() : ""))
         .filter(Boolean),
     });
 
-    if (resolvedToolName !== params.toolName) {
-      logVerbose(
-        `Web Search: Playwright MCP tool "${params.toolName}" not available; using "${resolvedToolName}".`,
+    const callToolAndExtract = async (toolName: string, toolArgs: Record<string, unknown>) => {
+      const toolResult = await client.callTool(
+        {
+          name: toolName,
+          arguments: toolArgs,
+        },
+        undefined,
+        {
+          timeout: params.timeoutSeconds * 1000,
+        },
       );
+
+      const structured = toolResult.structuredContent;
+      if (structured && typeof structured === "object" && !Array.isArray(structured)) {
+        return structured as Record<string, unknown>;
+      }
+
+      const textParts: string[] = [];
+      const contentParts = Array.isArray(toolResult.content) ? toolResult.content : [];
+      for (const part of contentParts) {
+        if (part.type === "text" && typeof part.text === "string") {
+          textParts.push(part.text);
+        }
+      }
+
+      return {
+        content: wrapWebContent(textParts.join("\n\n")),
+      };
+    };
+
+    if (toolPlan.kind === "search_tool") {
+      if (toolPlan.toolName !== params.toolName) {
+        logVerbose(
+          `Web Search: Playwright MCP tool "${params.toolName}" not available; using "${toolPlan.toolName}".`,
+        );
+      }
+      const payload = await callToolAndExtract(toolPlan.toolName, {
+        query: params.query,
+        count: params.count,
+        country: params.country,
+        language: params.language,
+        freshness: params.freshness,
+        date_after: params.dateAfter,
+        date_before: params.dateBefore,
+      });
+      return { toolName: toolPlan.toolName, payload, strategy: "search_tool" };
     }
 
-    const toolResult = await client.callTool(
+    const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(params.query)}`;
+    await client.callTool(
       {
-        name: resolvedToolName,
+        name: toolPlan.navigateToolName,
         arguments: {
-          query: params.query,
-          count: params.count,
-          country: params.country,
-          language: params.language,
-          freshness: params.freshness,
-          date_after: params.dateAfter,
-          date_before: params.dateBefore,
+          url: searchUrl,
         },
       },
       undefined,
@@ -1156,24 +1220,11 @@ async function runPlaywrightMcpWebSearch(params: {
       },
     );
 
-    const structured = toolResult.structuredContent;
-    if (structured && typeof structured === "object" && !Array.isArray(structured)) {
-      return { toolName: resolvedToolName, payload: structured as Record<string, unknown> };
-    }
-
-    const textParts: string[] = [];
-    const contentParts = Array.isArray(toolResult.content) ? toolResult.content : [];
-    for (const part of contentParts) {
-      if (part.type === "text" && typeof part.text === "string") {
-        textParts.push(part.text);
-      }
-    }
-
+    const workflowPayload = await callToolAndExtract(toolPlan.snapshotToolName, {});
     return {
-      toolName: resolvedToolName,
-      payload: {
-        content: wrapWebContent(textParts.join("\n\n")),
-      },
+      toolName: `${toolPlan.navigateToolName} -> ${toolPlan.snapshotToolName}`,
+      payload: workflowPayload,
+      strategy: "browser_workflow",
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1958,6 +2009,7 @@ async function runWebSearch(params: {
       query: params.query,
       provider: params.provider,
       toolName: mcpResult.toolName,
+      strategy: mcpResult.strategy,
       tookMs: Date.now() - start,
       externalContent: {
         untrusted: true,
@@ -2421,7 +2473,7 @@ export const __testing = {
   resolveGrokInlineCitations,
   extractGrokContent,
   resolvePlaywrightMcpServerUrl,
-  resolvePlaywrightMcpToolName,
+  resolvePlaywrightMcpToolPlan,
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,
