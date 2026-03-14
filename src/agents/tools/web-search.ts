@@ -1122,6 +1122,9 @@ async function runPlaywrightMcpWebSearch(params: {
         }
         const contentType = (res.headers.get("content-type") || "").toLowerCase();
         const body = (() => {
+          if (res.status === 204) {
+            return Promise.resolve({} as MpcRpcBody);
+          }
           if (contentType.includes("text/event-stream")) {
             return res
               .text()
@@ -1133,7 +1136,24 @@ async function runPlaywrightMcpWebSearch(params: {
                 return parsed;
               });
           }
-          return res.json() as Promise<MpcRpcBody>;
+          return res
+            .text()
+            .then((text) => {
+              const trimmed = text.trim();
+              if (!trimmed) {
+                return {} as MpcRpcBody;
+              }
+              try {
+                return JSON.parse(trimmed) as MpcRpcBody;
+              } catch {
+                throw new Error(
+                  `Playwright MCP returned non-JSON response: ${trimmed.slice(0, 200)}`,
+                );
+              }
+            })
+            .catch((err) => {
+              throw new Error(`Playwright MCP response parse failed: ${String(err)}`);
+            });
         })();
         const parsedBody = await body;
         return { body: parsedBody, sessionId: nextSessionId ?? sessionId };
