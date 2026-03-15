@@ -82,6 +82,9 @@ export function registerPluginHttpRoute(params: {
     source: params.source,
   };
   routes.push(entry);
+  params.log?.(
+    `plugin: route registered at ${normalizedPath} (${routeMatch}, ${params.auth})${suffix}`,
+  );
 
   return () => {
     const index = routes.indexOf(entry);
