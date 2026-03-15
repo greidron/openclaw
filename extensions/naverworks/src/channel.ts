@@ -654,9 +654,6 @@ ${inboundBody}`
             log: (line: string) => log?.info?.(line),
             handler,
           });
-          log?.info?.(
-            `naverworks[${account.accountId}]: webhook route registered at ${webhookPath}`,
-          );
           return unregister;
         });
         const unregister = () => {
