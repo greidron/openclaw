@@ -54,6 +54,20 @@ openclaw plugins install ./extensions/naverworks
 
       apiBaseUrl: "https://www.worksapis.com/v1.0", // optional
       markdownMode: "auto-flex", // optional: auto-flex | plain
+
+      autoThinking: {
+        enabled: true,
+        defaultLevel: "medium", // optional fallback when no keyword matches
+        lowKeywords: ["요약", "번역", "맞춤법"],
+        highKeywords: ["분석", "디버깅", "비교", "설계"],
+      },
+
+      statusStickers: {
+        enabled: true,
+        received: { packageId: "4", stickerId: "260" }, // Daily Life
+        processing: { packageId: "546", stickerId: "2980" }, // Moon: Salaryman Special
+        failed: { packageId: "2", stickerId: "18" }, // Brown & Cony
+      },
     },
   },
   bindings: [
@@ -76,6 +90,10 @@ openclaw plugins install ./extensions/naverworks
 - Outbound media replies are sent when the agent returns `mediaUrl` or `mediaUrls`. URL suffixes are used to infer NAVER WORKS content type (`image`, `audio`, or `file`).
 - Outbound text replies default to `markdownMode: "auto-flex"`, which detects markdown (headings/lists/links/tables/code blocks) and sends a NAVER WORKS Flexible Template (`content.type: "flex"`) for improved readability.
 - Set `markdownMode: "plain"` if you always want raw text delivery (no markdown-to-flex conversion).
+- `autoThinking` (optional) can auto-inject `/think <level>` before each inbound text based on keyword rules. Use this when you want NAVER WORKS requests to dynamically steer reasoning effort without manual `/think` commands.
+- `autoThinking` precedence: explicit user `/think` wins (no auto-injection), then `highKeywords`, then `lowKeywords`, then `defaultLevel` fallback.
+- `statusStickers` (optional) can send sticker-based status feedback for `received`, `processing`, and `failed` stages. Each stage uses `{ packageId, stickerId }`.
+- If `statusStickers.enabled` is true but a stage sticker is omitted, OpenClaw uses contextual defaults based on NAVER WORKS sticker-list categories: `received`=`4/260` (Daily Life), `processing`=`546/2980` (Moon: Salaryman Special), `failed`=`2/18` (Brown & Cony).
 - Inbound audio attachments are downloaded to local media storage when reachable, so OpenClaw media-understanding/STT can transcribe voice messages for agents.
 - Text-to-speech style audio replies are supported when the agent returns remote `mediaUrl`/`mediaUrls` audio links. Local file paths (for example raw `/tts audio` temp paths) are not uploadable by NAVER WORKS and are skipped with a warning.
 - `strictBinding` defaults to `true`. When no binding matches, the plugin drops the event instead of falling back to the default agent.
