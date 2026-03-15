@@ -1110,6 +1110,7 @@ async function runPlaywrightMcpWebSearch(params: {
   );
 
   try {
+    logVerbose(`Web Search: Connecting to Playwright MCP endpoint ${params.endpoint}`);
     await client.connect(transport, {
       timeout: params.timeoutSeconds * 1000,
     });
@@ -1117,11 +1118,15 @@ async function runPlaywrightMcpWebSearch(params: {
     const listedTools = await client.listTools(undefined, {
       timeout: params.timeoutSeconds * 1000,
     });
+    const availableToolNames = (listedTools.tools || [])
+      .map((tool) => (typeof tool?.name === "string" ? tool.name.trim() : ""))
+      .filter(Boolean);
+    logVerbose(
+      `Web Search: Playwright MCP exposed tools (${availableToolNames.length}): ${availableToolNames.join(", ") || "(none)"}`,
+    );
     const resolvedToolName = resolvePlaywrightMcpToolName({
       requestedToolName: params.toolName,
-      availableToolNames: (listedTools.tools || [])
-        .map((tool) => (typeof tool?.name === "string" ? tool.name.trim() : ""))
-        .filter(Boolean),
+      availableToolNames,
     });
 
     const callToolAndExtract = async (toolName: string, toolArgs: Record<string, unknown>) => {
@@ -1160,6 +1165,7 @@ async function runPlaywrightMcpWebSearch(params: {
       );
     }
 
+    logVerbose(`Web Search: Calling Playwright MCP tool "${resolvedToolName}"`);
     const payload = await callToolAndExtract(resolvedToolName, {
       query: params.query,
       count: params.count,
@@ -1173,6 +1179,7 @@ async function runPlaywrightMcpWebSearch(params: {
     return { toolName: resolvedToolName, payload };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    logVerbose(`Web Search: Playwright MCP failure: ${message}`);
     throw new Error(`Playwright MCP tool call failed: ${message}`, {
       cause: error,
     });
