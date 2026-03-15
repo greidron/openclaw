@@ -22,7 +22,7 @@ const {
   resolveKimiModel,
   resolveKimiBaseUrl,
   resolvePlaywrightMcpServerUrl,
-  resolvePlaywrightMcpToolPlan,
+  resolvePlaywrightMcpToolName,
   extractKimiCitations,
   resolveBraveMode,
   mapBraveLlmContextResults,
@@ -219,36 +219,20 @@ describe("web_search playwright-mcp config resolution", () => {
 
   it("prefers explicitly requested MCP tool when available", () => {
     expect(
-      resolvePlaywrightMcpToolPlan({
+      resolvePlaywrightMcpToolName({
         requestedToolName: "web_search",
         availableToolNames: ["web_search", "browser_navigate", "browser_snapshot"],
       }),
-    ).toEqual({ kind: "search_tool", toolName: "web_search" });
+    ).toBe("web_search");
   });
 
-  it("uses official playwright workflow tools when search tool is unavailable", () => {
-    expect(
-      resolvePlaywrightMcpToolPlan({
-        requestedToolName: "web_search",
-        availableToolNames: ["browser_navigate", "browser_snapshot", "browser_wait_for"],
-      }),
-    ).toEqual({
-      kind: "browser_workflow",
-      navigateToolName: "browser_navigate",
-      snapshotToolName: "browser_snapshot",
-      waitForToolName: "browser_wait_for",
-    });
-  });
-
-  it("throws a clear error when official tool plan is unavailable", () => {
+  it("throws a clear error when requested MCP tool is unavailable", () => {
     expect(() =>
-      resolvePlaywrightMcpToolPlan({
+      resolvePlaywrightMcpToolName({
         requestedToolName: "web_search",
         availableToolNames: ["navigate", "click"],
       }),
-    ).toThrow(
-      'Playwright MCP cannot find a usable tool plan. Expected "web_search" or official workflow tools (browser_navigate + browser_snapshot). Available tools: navigate, click',
-    );
+    ).toThrow('Playwright MCP tool "web_search" not found. Available tools: navigate, click');
   });
 });
 
