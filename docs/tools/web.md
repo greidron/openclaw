@@ -93,6 +93,8 @@ See [Perplexity Search API Docs](https://docs.perplexity.ai/guides/search-quicks
 - Kimi: `tools.web.search.kimi.apiKey`
 - Perplexity: `tools.web.search.perplexity.apiKey`
 - Playwright MCP: no API key required; set `tools.web.search.playwrightMcp.serverUrl`
+- Playwright MCP (optional): `tools.web.search.playwrightMcp.defaultEngine` (`google` by default)
+- Playwright MCP (optional): `tools.web.search.playwrightMcp.includeNaverForProductSearch` (`true` by default)
 
 All of these fields also support SecretRef objects.
 
@@ -107,6 +109,26 @@ All of these fields also support SecretRef objects.
 For a gateway install, put these in `~/.openclaw/.env` (or your service environment). See [Env vars](/help/faq#how-does-openclaw-load-environment-variables).
 
 ### Config examples
+
+**Playwright MCP (engine-aware browser workflow + MCP tool):**
+
+```json5
+{
+  tools: {
+    web: {
+      search: {
+        enabled: true,
+        provider: "playwright-mcp",
+        playwrightMcp: {
+          serverUrl: "http://127.0.0.1:8931/mcp",
+          defaultEngine: "google",
+          includeNaverForProductSearch: true,
+        },
+      },
+    },
+  },
+}
+```
 
 **Brave Search:**
 

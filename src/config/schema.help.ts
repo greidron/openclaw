@@ -674,6 +674,10 @@ export const FIELD_HELP: Record<string, string> = {
     'Optional Sonar/OpenRouter model override (default: "perplexity/sonar-pro"). Setting this opts Perplexity into the legacy chat-completions compatibility path.',
   "tools.web.search.playwrightMcp.serverUrl":
     "Playwright MCP HTTP endpoint URL used by the playwright-mcp web_search provider.",
+  "tools.web.search.playwrightMcp.defaultEngine":
+    'Default search engine used for browser-based MCP fallback URLs ("google", "duckduckgo", "bing", "naver").',
+  "tools.web.search.playwrightMcp.includeNaverForProductSearch":
+    "When true, run an additional Naver search for product/shopping-like queries in playwright-mcp browser fallback mode.",
   "tools.web.fetch.enabled": "Enable the web_fetch tool (lightweight HTTP fetch).",
   "tools.web.fetch.maxChars": "Max characters returned by web_fetch (truncated).",
   "tools.web.fetch.maxCharsCap":

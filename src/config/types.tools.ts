@@ -494,6 +494,10 @@ export type ToolsConfig = {
       playwrightMcp?: {
         /** MCP server HTTP endpoint URL (for example, http://127.0.0.1:8788/mcp). */
         serverUrl?: string;
+        /** Default engine for browser_navigate fallback search URLs (default: "google"). */
+        defaultEngine?: "google" | "duckduckgo" | "bing" | "naver";
+        /** Also run Naver search when query looks like a product/shopping intent (default: true). */
+        includeNaverForProductSearch?: boolean;
       };
     };
     fetch?: {

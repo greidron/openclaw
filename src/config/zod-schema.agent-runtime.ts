@@ -318,6 +318,8 @@ export const ToolsWebSearchSchema = z
     playwrightMcp: z
       .object({
         serverUrl: z.string().optional(),
+        defaultEngine: z.enum(["google", "duckduckgo", "bing", "naver"]).optional(),
+        includeNaverForProductSearch: z.boolean().optional(),
       })
       .strict()
       .optional(),
