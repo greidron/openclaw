@@ -78,6 +78,8 @@ export function resolveAccount(
     (asString(accountCfg.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
     (asString(section.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
     "pairing";
+  const defaultWebhookPath =
+    resolvedId === DEFAULT_ACCOUNT_ID ? "/naverworks/events" : `/naverworks/${resolvedId}/events`;
 
   return {
     accountId: resolvedId,
@@ -86,9 +88,7 @@ export function resolveAccount(
       (section.enabled as boolean | undefined) ??
       true,
     webhookPath:
-      asString(accountCfg.webhookPath) ??
-      asString(section.webhookPath) ??
-      `/naverworks/${resolvedId}/events`,
+      asString(accountCfg.webhookPath) ?? asString(section.webhookPath) ?? defaultWebhookPath,
     dmPolicy,
     allowFrom: [...asStringList(section.allowFrom), ...asStringList(accountCfg.allowFrom)],
     botName: asString(accountCfg.botName) ?? asString(section.botName) ?? "NAVER WORKS Bot",

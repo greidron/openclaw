@@ -7,6 +7,28 @@ describe("resolveAccount", () => {
     expect(account.strictBinding).toBe(true);
   });
 
+  it("uses legacy default webhook path for default account", () => {
+    const account = resolveAccount({ channels: { naverworks: {} } }, "default");
+    expect(account.webhookPath).toBe("/naverworks/events");
+  });
+
+  it("uses account-scoped webhook path fallback for non-default accounts", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            accounts: {
+              teamA: {},
+            },
+          },
+        },
+      },
+      "teamA",
+    );
+
+    expect(account.webhookPath).toBe("/naverworks/teamA/events");
+  });
+
   it("allows strictBinding override per account", () => {
     const account = resolveAccount(
       {
