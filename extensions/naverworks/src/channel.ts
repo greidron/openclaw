@@ -71,6 +71,29 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
 
 const activeRouteUnregisters = new Map<string, () => void>();
 
+export function resolveWebhookPaths(account: ReturnType<typeof resolveAccount>): string[] {
+  const primary = account.webhookPath?.trim();
+  if (!primary) {
+    return [];
+  }
+
+  const candidates = new Set<string>();
+  candidates.add(primary);
+
+  const trailingNormalized = primary.replace(/\/+$/g, "");
+  if (trailingNormalized && trailingNormalized !== "/") {
+    candidates.add(trailingNormalized);
+    candidates.add(`${trailingNormalized}/`);
+  }
+
+  if (account.accountId === DEFAULT_ACCOUNT_ID) {
+    candidates.add("/naverworks/events");
+    candidates.add("/naverworks/events/");
+  }
+
+  return [...candidates];
+}
+
 const INLINE_THINK_DIRECTIVE_RE = /(^|\s)\/(?:think|thinking|t)(?::|\s|$)/i;
 
 type AutoThinkingLevel = "low" | "medium" | "high";
@@ -403,11 +426,11 @@ export function createNaverWorksPlugin() {
           return { stop: () => {} };
         }
 
-        const routeKey = `${account.accountId}:${account.webhookPath}`;
+        const routeKey = `${account.accountId}:webhook`;
         const prev = activeRouteUnregisters.get(routeKey);
         if (prev) {
           log?.info?.(
-            `naverworks[${account.accountId}]: replacing existing webhook route ${account.webhookPath}`,
+            `naverworks[${account.accountId}]: replacing existing webhook route registration`,
           );
           prev();
           activeRouteUnregisters.delete(routeKey);
@@ -618,17 +641,29 @@ ${inboundBody}`
           },
         });
 
-        const unregister = registerPluginHttpRoute({
-          path: account.webhookPath,
-          auth: "plugin",
-          pluginId: CHANNEL_ID,
-          accountId: account.accountId,
-          log: (line: string) => log?.info?.(line),
-          handler,
+        const webhookPaths = resolveWebhookPaths(account);
+        if (webhookPaths.length === 0) {
+          throw new Error(`webhook path missing for account ${account.accountId}`);
+        }
+        const unregisterHandlers = webhookPaths.map((webhookPath) => {
+          const unregister = registerPluginHttpRoute({
+            path: webhookPath,
+            auth: "plugin",
+            pluginId: CHANNEL_ID,
+            accountId: account.accountId,
+            log: (line: string) => log?.info?.(line),
+            handler,
+          });
+          log?.info?.(
+            `naverworks[${account.accountId}]: webhook route registered at ${webhookPath}`,
+          );
+          return unregister;
         });
-        log?.info?.(
-          `naverworks[${account.accountId}]: webhook route registered at ${account.webhookPath}`,
-        );
+        const unregister = () => {
+          for (const fn of unregisterHandlers) {
+            fn();
+          }
+        };
         activeRouteUnregisters.set(routeKey, unregister);
         ctx.setStatus({ connected: true, lastError: null });
 

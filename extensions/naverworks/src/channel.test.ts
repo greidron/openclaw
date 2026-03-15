@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { resolveAccount } from "./accounts.js";
-import { createNaverWorksPlugin, resolveAutoThinkingDirective } from "./channel.js";
+import {
+  createNaverWorksPlugin,
+  resolveAutoThinkingDirective,
+  resolveWebhookPaths,
+} from "./channel.js";
 
 describe("naverworks channel plugin", () => {
   it("treats account as configured for inbound webhook when route path is resolvable", async () => {
@@ -49,6 +53,29 @@ describe("naverworks channel plugin", () => {
         text: "hello",
       }),
     ).rejects.toThrow(/not configured for outbound delivery/i);
+  });
+
+  it("resolves webhook path aliases for default account", () => {
+    const account = resolveAccount({ channels: { naverworks: {} } }, "default");
+    expect(resolveWebhookPaths(account)).toContain("/naverworks/events");
+    expect(resolveWebhookPaths(account)).toContain("/naverworks/events/");
+  });
+
+  it("normalizes trailing slash variants for custom webhook paths", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            webhookPath: "/naverworks/custom/",
+          },
+        },
+      },
+      "default",
+    );
+
+    const paths = resolveWebhookPaths(account);
+    expect(paths).toContain("/naverworks/custom");
+    expect(paths).toContain("/naverworks/custom/");
   });
 
   it("resolves auto thinking directive from keyword rules", () => {
