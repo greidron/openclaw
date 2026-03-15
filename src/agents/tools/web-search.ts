@@ -1,3 +1,5 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Type } from "@sinclair/typebox";
 import { formatCliCommand } from "../../cli/command-format.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -22,7 +24,14 @@ import {
   writeCache,
 } from "./web-shared.js";
 
-const SEARCH_PROVIDERS = ["brave", "gemini", "grok", "kimi", "perplexity"] as const;
+const SEARCH_PROVIDERS = [
+  "brave",
+  "gemini",
+  "grok",
+  "kimi",
+  "perplexity",
+  "playwright-mcp",
+] as const;
 const DEFAULT_SEARCH_COUNT = 5;
 const MAX_SEARCH_COUNT = 10;
 
@@ -39,6 +48,9 @@ const XAI_API_ENDPOINT = "https://api.x.ai/v1/responses";
 const DEFAULT_GROK_MODEL = "grok-4-1-fast";
 const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/v1";
 const DEFAULT_KIMI_MODEL = "moonshot-v1-128k";
+const DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME = "web_search";
+const DEFAULT_PLAYWRIGHT_MCP_ENGINE = "google";
+const PLAYWRIGHT_MCP_ENGINES = ["google", "duckduckgo", "bing", "naver"] as const;
 const KIMI_WEB_SEARCH_TOOL = {
   type: "builtin_function",
   function: { name: "$web_search" },
@@ -333,6 +345,12 @@ type KimiConfig = {
   model?: string;
 };
 
+type PlaywrightMcpConfig = {
+  serverUrl?: string;
+  defaultEngine?: string;
+  includeNaverForProductSearch?: boolean;
+};
+
 type GrokSearchResponse = {
   output?: Array<{
     type?: string;
@@ -620,6 +638,9 @@ function resolveSearchProvider(search?: WebSearchConfig): (typeof SEARCH_PROVIDE
   }
   if (raw === "perplexity") {
     return "perplexity";
+  }
+  if (raw === "playwright-mcp") {
+    return "playwright-mcp";
   }
 
   // Auto-detect provider from available API keys (alphabetical order)
@@ -915,6 +936,118 @@ function resolveGeminiModel(gemini?: GeminiConfig): string {
   return fromConfig || DEFAULT_GEMINI_MODEL;
 }
 
+function resolvePlaywrightMcpConfig(search?: WebSearchConfig): PlaywrightMcpConfig {
+  if (!search || typeof search !== "object") {
+    return {};
+  }
+  const config = "playwrightMcp" in search ? search.playwrightMcp : undefined;
+  if (!config || typeof config !== "object") {
+    return {};
+  }
+  return config as PlaywrightMcpConfig;
+}
+
+function resolvePlaywrightMcpServerUrl(config?: PlaywrightMcpConfig): string | undefined {
+  const fromConfig =
+    config && "serverUrl" in config && typeof config.serverUrl === "string"
+      ? config.serverUrl.trim()
+      : "";
+  if (fromConfig) {
+    return fromConfig;
+  }
+  const fromEnv = normalizeSecretInput(process.env.PLAYWRIGHT_MCP_SERVER_URL);
+  return fromEnv || undefined;
+}
+
+function resolvePlaywrightMcpDefaultEngine(
+  config?: PlaywrightMcpConfig,
+): (typeof PLAYWRIGHT_MCP_ENGINES)[number] | undefined {
+  const fromConfig =
+    config && typeof config.defaultEngine === "string"
+      ? config.defaultEngine.trim().toLowerCase()
+      : "";
+  if (fromConfig && PLAYWRIGHT_MCP_ENGINES.includes(fromConfig as never)) {
+    return fromConfig as (typeof PLAYWRIGHT_MCP_ENGINES)[number];
+  }
+
+  const fromEnv = normalizeSecretInput(process.env.PLAYWRIGHT_MCP_DEFAULT_ENGINE)?.toLowerCase();
+  if (fromEnv && PLAYWRIGHT_MCP_ENGINES.includes(fromEnv as never)) {
+    return fromEnv as (typeof PLAYWRIGHT_MCP_ENGINES)[number];
+  }
+
+  return undefined;
+}
+
+function resolvePlaywrightMcpIncludeNaverForProductSearch(config?: PlaywrightMcpConfig): boolean {
+  if (typeof config?.includeNaverForProductSearch === "boolean") {
+    return config.includeNaverForProductSearch;
+  }
+  const fromEnv = normalizeSecretInput(
+    process.env.PLAYWRIGHT_MCP_INCLUDE_NAVER_FOR_PRODUCT_SEARCH,
+  )?.toLowerCase();
+  if (fromEnv === "true" || fromEnv === "1") {
+    return true;
+  }
+  if (fromEnv === "false" || fromEnv === "0") {
+    return false;
+  }
+  return true;
+}
+
+function isProductSearchQuery(query: string): boolean {
+  return /(상품|제품|가격|최저가|비교|구매|쇼핑|후기|review|price|buy|deal|best)/i.test(query);
+}
+
+function buildSearchUrl(engine: (typeof PLAYWRIGHT_MCP_ENGINES)[number], query: string): string {
+  const encoded = encodeURIComponent(query);
+  if (engine === "google") {
+    return `https://www.google.com/search?q=${encoded}`;
+  }
+  if (engine === "bing") {
+    return `https://www.bing.com/search?q=${encoded}`;
+  }
+  if (engine === "naver") {
+    return `https://search.naver.com/search.naver?query=${encoded}`;
+  }
+  return `https://duckduckgo.com/?q=${encoded}`;
+}
+
+function resolvePlaywrightMcpSearchUrls(params: {
+  query: string;
+  defaultEngine: (typeof PLAYWRIGHT_MCP_ENGINES)[number];
+  includeNaverForProductSearch: boolean;
+}): string[] {
+  const urls = [buildSearchUrl(params.defaultEngine, params.query)];
+  if (params.includeNaverForProductSearch && isProductSearchQuery(params.query)) {
+    urls.push(buildSearchUrl("naver", params.query));
+  }
+  return Array.from(new Set(urls));
+}
+
+function resolvePlaywrightMcpToolPlan(params: {
+  requestedToolName: string;
+  availableToolNames: string[];
+}): { mode: "tool_call"; toolName: string } | { mode: "browser_workflow" } {
+  const available = new Set(
+    params.availableToolNames
+      .map((name) => (typeof name === "string" ? name.trim() : ""))
+      .filter(Boolean),
+  );
+
+  if (available.has(params.requestedToolName)) {
+    return { mode: "tool_call", toolName: params.requestedToolName };
+  }
+
+  if (available.has("browser_navigate") && available.has("browser_snapshot")) {
+    return { mode: "browser_workflow" };
+  }
+
+  const availableLabel = available.size > 0 ? Array.from(available).join(", ") : "(none)";
+  throw new Error(
+    `Playwright MCP tool "${params.requestedToolName}" not found and browser fallback tools are unavailable. Available tools: ${availableLabel}`,
+  );
+}
+
 async function withTrustedWebSearchEndpoint<T>(
   params: {
     url: string;
@@ -1019,6 +1152,164 @@ async function runGeminiSearch(params: {
       return { content, citations };
     },
   );
+}
+
+async function runPlaywrightMcpWebSearch(params: {
+  endpoint: string;
+  toolName: string;
+  query: string;
+  count: number;
+  country?: string;
+  language?: string;
+  freshness?: string;
+  dateAfter?: string;
+  dateBefore?: string;
+  timeoutSeconds: number;
+  defaultEngine: (typeof PLAYWRIGHT_MCP_ENGINES)[number];
+  includeNaverForProductSearch: boolean;
+}): Promise<{ toolName: string; payload: Record<string, unknown> }> {
+  const transport = new StreamableHTTPClientTransport(new URL(params.endpoint), {
+    requestInit: {
+      headers: {
+        Accept: "application/json, text/event-stream",
+      },
+    },
+  });
+
+  const client = new Client(
+    {
+      name: "openclaw-web-search",
+      version: "1.0.0",
+    },
+    { capabilities: {} },
+  );
+
+  try {
+    logVerbose(`Web Search: Connecting to Playwright MCP endpoint ${params.endpoint}`);
+    await client.connect(transport, {
+      timeout: params.timeoutSeconds * 1000,
+    });
+
+    const listedTools = await client.listTools(undefined, {
+      timeout: params.timeoutSeconds * 1000,
+    });
+    const availableToolNames = (listedTools.tools || [])
+      .map((tool) => (typeof tool?.name === "string" ? tool.name.trim() : ""))
+      .filter(Boolean);
+    logVerbose(
+      `Web Search: Playwright MCP exposed tools (${availableToolNames.length}): ${availableToolNames.join(", ") || "(none)"}`,
+    );
+    const toolPlan = resolvePlaywrightMcpToolPlan({
+      requestedToolName: params.toolName,
+      availableToolNames,
+    });
+
+    const callToolAndExtract = async (toolName: string, toolArgs: Record<string, unknown>) => {
+      const toolResult = await client.callTool(
+        {
+          name: toolName,
+          arguments: toolArgs,
+        },
+        undefined,
+        {
+          timeout: params.timeoutSeconds * 1000,
+        },
+      );
+
+      const structured = toolResult.structuredContent;
+      if (structured && typeof structured === "object" && !Array.isArray(structured)) {
+        return structured as Record<string, unknown>;
+      }
+
+      const textParts: string[] = [];
+      const contentParts = Array.isArray(toolResult.content) ? toolResult.content : [];
+      for (const part of contentParts) {
+        if (part.type === "text" && typeof part.text === "string") {
+          textParts.push(part.text);
+        }
+      }
+
+      return {
+        content: wrapWebContent(textParts.join("\n\n")),
+      };
+    };
+
+    if (toolPlan.mode === "tool_call" && toolPlan.toolName !== params.toolName) {
+      logVerbose(
+        `Web Search: Playwright MCP tool "${params.toolName}" not available; using "${toolPlan.toolName}".`,
+      );
+    }
+
+    if (toolPlan.mode === "tool_call") {
+      logVerbose(`Web Search: Calling Playwright MCP tool "${toolPlan.toolName}"`);
+      const payload = await callToolAndExtract(toolPlan.toolName, {
+        query: params.query,
+        count: params.count,
+        country: params.country,
+        language: params.language,
+        freshness: params.freshness,
+        date_after: params.dateAfter,
+        date_before: params.dateBefore,
+      });
+
+      if (toolPlan.toolName !== DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME) {
+        return { toolName: toolPlan.toolName, payload };
+      }
+    }
+
+    const searchUrls = resolvePlaywrightMcpSearchUrls({
+      query: params.query,
+      defaultEngine: params.defaultEngine,
+      includeNaverForProductSearch: params.includeNaverForProductSearch,
+    });
+    logVerbose(
+      `Web Search: Running Playwright MCP browser workflow over URLs: ${searchUrls.join(", ")}`,
+    );
+
+    const snapshotContents: string[] = [];
+    for (const url of searchUrls) {
+      await client.callTool(
+        {
+          name: "browser_navigate",
+          arguments: { url },
+        },
+        undefined,
+        { timeout: params.timeoutSeconds * 1000 },
+      );
+      if (availableToolNames.includes("browser_wait_for")) {
+        await client.callTool(
+          {
+            name: "browser_wait_for",
+            arguments: { time: 2 },
+          },
+          undefined,
+          { timeout: params.timeoutSeconds * 1000 },
+        );
+      }
+      const snapshotPayload = await callToolAndExtract("browser_snapshot", {});
+      const section =
+        typeof snapshotPayload.content === "string"
+          ? snapshotPayload.content
+          : JSON.stringify(snapshotPayload);
+      snapshotContents.push(`## ${url}
+${section}`);
+    }
+
+    return {
+      toolName: toolPlan.mode === "tool_call" ? toolPlan.toolName : "browser_workflow",
+      payload: {
+        content: wrapWebContent(snapshotContents.join("\n\n")),
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logVerbose(`Web Search: Playwright MCP failure: ${message}`);
+    throw new Error(`Playwright MCP tool call failed: ${message}`, {
+      cause: error,
+    });
+  } finally {
+    await transport.close().catch(() => undefined);
+  }
 }
 
 function resolveSearchCount(value: unknown, fallback: number): number {
@@ -1603,6 +1894,9 @@ async function runWebSearch(params: {
   kimiBaseUrl?: string;
   kimiModel?: string;
   braveMode?: "web" | "llm-context";
+  playwrightMcpServerUrl?: string;
+  playwrightMcpDefaultEngine?: (typeof PLAYWRIGHT_MCP_ENGINES)[number];
+  playwrightMcpIncludeNaverForProductSearch?: boolean;
 }): Promise<Record<string, unknown>> {
   const effectiveBraveMode = params.braveMode ?? "web";
   const providerSpecificKey =
@@ -1769,6 +2063,45 @@ async function runWebSearch(params: {
     return payload;
   }
 
+  if (params.provider === "playwright-mcp") {
+    const endpoint = params.playwrightMcpServerUrl?.trim();
+    if (!endpoint) {
+      throw new Error(
+        "Playwright MCP provider requires tools.web.search.playwrightMcp.serverUrl (or PLAYWRIGHT_MCP_SERVER_URL).",
+      );
+    }
+    const mcpResult = await runPlaywrightMcpWebSearch({
+      endpoint,
+      toolName: DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME,
+      query: params.query,
+      count: params.count,
+      country: params.country,
+      language: params.language,
+      freshness: params.freshness,
+      dateAfter: params.dateAfter,
+      dateBefore: params.dateBefore,
+      timeoutSeconds: params.timeoutSeconds,
+      defaultEngine: params.playwrightMcpDefaultEngine ?? DEFAULT_PLAYWRIGHT_MCP_ENGINE,
+      includeNaverForProductSearch: params.playwrightMcpIncludeNaverForProductSearch ?? true,
+    });
+
+    const payload = {
+      query: params.query,
+      provider: params.provider,
+      toolName: mcpResult.toolName,
+      tookMs: Date.now() - start,
+      externalContent: {
+        untrusted: true,
+        source: "web_search",
+        provider: params.provider,
+        wrapped: true,
+      },
+      ...mcpResult.payload,
+    };
+    writeCache(SEARCH_CACHE, cacheKey, payload, params.cacheTtlMs);
+    return payload;
+  }
+
   if (params.provider !== "brave") {
     throw new Error("Unsupported web search provider.");
   }
@@ -1909,6 +2242,7 @@ export function createWebSearchTool(options?: {
   const grokConfig = resolveGrokConfig(search);
   const geminiConfig = resolveGeminiConfig(search);
   const kimiConfig = resolveKimiConfig(search);
+  const playwrightMcpConfig = resolvePlaywrightMcpConfig(search);
   const braveConfig = resolveBraveConfig(search);
   const braveMode = resolveBraveMode(braveConfig);
 
@@ -1921,11 +2255,13 @@ export function createWebSearchTool(options?: {
         ? "Search the web using xAI Grok. Returns AI-synthesized answers with citations from real-time web search."
         : provider === "kimi"
           ? "Search the web using Kimi by Moonshot. Returns AI-synthesized answers with citations from native $web_search."
-          : provider === "gemini"
-            ? "Search the web using Gemini with Google Search grounding. Returns AI-synthesized answers with citations from Google Search."
-            : braveMode === "llm-context"
-              ? "Search the web using Brave Search LLM Context API. Returns pre-extracted page content (text chunks, tables, code blocks) optimized for LLM grounding."
-              : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
+          : provider === "playwright-mcp"
+            ? "Search the web by calling a remote MCP tool (for example, Playwright MCP) over HTTP tools/call."
+            : provider === "gemini"
+              ? "Search the web using Gemini with Google Search grounding. Returns AI-synthesized answers with citations from Google Search."
+              : braveMode === "llm-context"
+                ? "Search the web using Brave Search LLM Context API. Returns pre-extracted page content (text chunks, tables, code blocks) optimized for LLM grounding."
+                : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
 
   return {
     label: "Web Search",
@@ -1949,7 +2285,9 @@ export function createWebSearchTool(options?: {
               ? resolveKimiApiKey(kimiConfig)
               : provider === "gemini"
                 ? resolveGeminiApiKey(geminiConfig)
-                : resolveSearchApiKey(search);
+                : provider === "playwright-mcp"
+                  ? "playwright-mcp"
+                  : resolveSearchApiKey(search);
 
       if (!apiKey) {
         return jsonResult(missingSearchKeyPayload(provider));
@@ -2186,6 +2524,11 @@ export function createWebSearchTool(options?: {
         kimiBaseUrl: resolveKimiBaseUrl(kimiConfig),
         kimiModel: resolveKimiModel(kimiConfig),
         braveMode,
+        playwrightMcpServerUrl: resolvePlaywrightMcpServerUrl(playwrightMcpConfig),
+        playwrightMcpDefaultEngine:
+          resolvePlaywrightMcpDefaultEngine(playwrightMcpConfig) ?? DEFAULT_PLAYWRIGHT_MCP_ENGINE,
+        playwrightMcpIncludeNaverForProductSearch:
+          resolvePlaywrightMcpIncludeNaverForProductSearch(playwrightMcpConfig),
       });
       return jsonResult(result);
     },
@@ -2212,6 +2555,11 @@ export const __testing = {
   resolveGrokModel,
   resolveGrokInlineCitations,
   extractGrokContent,
+  resolvePlaywrightMcpServerUrl,
+  resolvePlaywrightMcpDefaultEngine,
+  resolvePlaywrightMcpIncludeNaverForProductSearch,
+  resolvePlaywrightMcpSearchUrls,
+  resolvePlaywrightMcpToolPlan,
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,

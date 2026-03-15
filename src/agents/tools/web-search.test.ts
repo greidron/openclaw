@@ -21,6 +21,11 @@ const {
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,
+  resolvePlaywrightMcpServerUrl,
+  resolvePlaywrightMcpDefaultEngine,
+  resolvePlaywrightMcpIncludeNaverForProductSearch,
+  resolvePlaywrightMcpSearchUrls,
+  resolvePlaywrightMcpToolPlan,
   extractKimiCitations,
   resolveBraveMode,
   mapBraveLlmContextResults,
@@ -196,6 +201,77 @@ describe("web_search date normalization", () => {
   it("rejects invalid ISO dates", () => {
     expect(isoToPerplexityDate("1/15/2024")).toBeUndefined();
     expect(isoToPerplexityDate("invalid")).toBeUndefined();
+  });
+});
+
+describe("web_search playwright-mcp config resolution", () => {
+  it("resolves explicit provider value", () => {
+    expect(__testing.resolveSearchProvider({ provider: "playwright-mcp" } as never)).toBe(
+      "playwright-mcp",
+    );
+  });
+
+  it("reads MCP endpoint from config or env", () => {
+    expect(resolvePlaywrightMcpServerUrl({ serverUrl: "http://127.0.0.1:8788/mcp" })).toBe(
+      "http://127.0.0.1:8788/mcp",
+    );
+    withEnv({ PLAYWRIGHT_MCP_SERVER_URL: "http://localhost:9000/mcp" }, () => {
+      expect(resolvePlaywrightMcpServerUrl({})).toBe("http://localhost:9000/mcp");
+    });
+  });
+
+  it("prefers explicitly requested MCP tool when available", () => {
+    expect(
+      resolvePlaywrightMcpToolPlan({
+        requestedToolName: "web_search",
+        availableToolNames: ["web_search", "browser_navigate", "browser_snapshot"],
+      }),
+    ).toEqual({ mode: "tool_call", toolName: "web_search" });
+  });
+
+  it("falls back to browser workflow when search tool is unavailable", () => {
+    expect(
+      resolvePlaywrightMcpToolPlan({
+        requestedToolName: "web_search",
+        availableToolNames: ["browser_navigate", "browser_snapshot", "browser_wait_for"],
+      }),
+    ).toEqual({ mode: "browser_workflow" });
+  });
+
+  it("throws a clear error when tool and browser fallback are unavailable", () => {
+    expect(() =>
+      resolvePlaywrightMcpToolPlan({
+        requestedToolName: "web_search",
+        availableToolNames: ["navigate", "click"],
+      }),
+    ).toThrow(
+      'Playwright MCP tool "web_search" not found and browser fallback tools are unavailable. Available tools: navigate, click',
+    );
+  });
+
+  it("resolves default engine from config or env", () => {
+    expect(resolvePlaywrightMcpDefaultEngine({ defaultEngine: "google" })).toBe("google");
+    expect(resolvePlaywrightMcpDefaultEngine({ defaultEngine: "duckduckgo" })).toBe("duckduckgo");
+    withEnv({ PLAYWRIGHT_MCP_DEFAULT_ENGINE: "bing" }, () => {
+      expect(resolvePlaywrightMcpDefaultEngine({})).toBe("bing");
+    });
+  });
+
+  it("detects product intent and includes naver search URL", () => {
+    expect(
+      resolvePlaywrightMcpSearchUrls({
+        query: "아이폰 16 최저가 비교",
+        defaultEngine: "google",
+        includeNaverForProductSearch: true,
+      }),
+    ).toEqual([
+      "https://www.google.com/search?q=%EC%95%84%EC%9D%B4%ED%8F%B0%2016%20%EC%B5%9C%EC%A0%80%EA%B0%80%20%EB%B9%84%EA%B5%90",
+      "https://search.naver.com/search.naver?query=%EC%95%84%EC%9D%B4%ED%8F%B0%2016%20%EC%B5%9C%EC%A0%80%EA%B0%80%20%EB%B9%84%EA%B5%90",
+    ]);
+  });
+
+  it("defaults includeNaverForProductSearch to true", () => {
+    expect(resolvePlaywrightMcpIncludeNaverForProductSearch({})).toBe(true);
   });
 });
 
