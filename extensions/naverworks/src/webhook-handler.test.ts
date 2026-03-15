@@ -1,7 +1,35 @@
 import crypto from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { parseNaverWorksInbound, verifyNaverWorksSignature } from "./webhook-handler.js";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createNaverWorksWebhookHandler,
+  parseNaverWorksInbound,
+  verifyNaverWorksSignature,
+} from "./webhook-handler.js";
 
+describe("createNaverWorksWebhookHandler", () => {
+  it("returns true after handling non-POST requests", async () => {
+    const handler = createNaverWorksWebhookHandler({
+      account: {
+        accountId: "default",
+        dmPolicy: "allowlist",
+        allowFrom: [],
+      } as never,
+      deliver: async () => {},
+    });
+
+    const req = { method: "GET" } as IncomingMessage;
+    const res = {
+      writeHead: vi.fn(),
+      end: vi.fn(),
+    } as unknown as ServerResponse;
+
+    await expect(handler(req, res)).resolves.toBe(true);
+    expect(res.writeHead).toHaveBeenCalledWith(405, {
+      "Content-Type": "application/json",
+    });
+  });
+});
 describe("parseNaverWorksInbound", () => {
   it("parses direct message payload with team + user ids", () => {
     const payload = JSON.stringify({
