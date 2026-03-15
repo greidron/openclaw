@@ -10,6 +10,12 @@ type LegacyOutboundSendDeps = {
 };
 
 /**
+ * Back-compat shim for legacy imports that still resolve
+ * `src/infra/outbound/send-deps` from older plugin/runtime builds.
+ */
+export * from "../../cli/outbound-send-deps.js";
+
+/**
  * Dynamic bag of per-channel send functions, keyed by channel ID.
  * Each outbound adapter resolves its own function from this record and
  * falls back to a direct import when the key is absent.

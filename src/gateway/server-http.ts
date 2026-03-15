@@ -319,6 +319,7 @@ function buildPluginRequestStages(params: {
   if (!params.handlePluginRequest) {
     return [];
   }
+
   let pluginGatewayAuthSatisfied = false;
   return [
     {

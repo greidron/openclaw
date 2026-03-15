@@ -1,5 +1,16 @@
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
-import type { NaverWorksAccount } from "./types.js";
+import type { NaverWorksAccount, NaverWorksStickerRef } from "./types.js";
+
+const DEFAULT_STATUS_STICKERS: Required<NonNullable<NaverWorksAccount["statusStickers"]>> = {
+  enabled: true,
+  // Based on NAVER WORKS sticker-list categories:
+  // - received: Daily Life (package 4)
+  // - processing: Moon: Salaryman Special (package 546)
+  // - failed: Brown & Cony (package 2)
+  received: { packageId: "4", stickerId: "260" },
+  processing: { packageId: "546", stickerId: "2980" },
+  failed: { packageId: "2", stickerId: "18" },
+};
 
 function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -12,6 +23,28 @@ function asStringList(value: unknown): string[] {
   return value
     .map((entry) => (typeof entry === "string" ? entry.trim() : String(entry ?? "").trim()))
     .filter((entry) => entry.length > 0);
+}
+
+function asThinkingLevel(value: unknown): "low" | "medium" | "high" | undefined {
+  const level = asString(value)?.toLowerCase();
+  if (!level) return undefined;
+  if (level === "low" || level === "medium" || level === "high") {
+    return level;
+  }
+  return undefined;
+}
+
+function asStickerRef(value: unknown): NaverWorksStickerRef | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const packageId = asString(record.packageId);
+  const stickerId = asString(record.stickerId);
+  if (!packageId || !stickerId) {
+    return undefined;
+  }
+  return { packageId, stickerId };
 }
 
 function normalizePrivateKey(value: string | undefined): string | undefined {
@@ -37,10 +70,16 @@ export function resolveAccount(
   const accounts = (section.accounts ?? {}) as Record<string, unknown>;
   const accountCfg = (accounts[resolvedId] ?? {}) as Record<string, unknown>;
 
+  const sectionAutoThinking = (section.autoThinking ?? {}) as Record<string, unknown>;
+  const accountAutoThinking = (accountCfg.autoThinking ?? {}) as Record<string, unknown>;
+  const sectionStatusStickers = (section.statusStickers ?? {}) as Record<string, unknown>;
+  const accountStatusStickers = (accountCfg.statusStickers ?? {}) as Record<string, unknown>;
   const dmPolicy =
     (asString(accountCfg.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
     (asString(section.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
     "pairing";
+  const defaultWebhookPath =
+    resolvedId === DEFAULT_ACCOUNT_ID ? "/naverworks/events" : `/naverworks/${resolvedId}/events`;
 
   return {
     accountId: resolvedId,
@@ -49,9 +88,7 @@ export function resolveAccount(
       (section.enabled as boolean | undefined) ??
       true,
     webhookPath:
-      asString(accountCfg.webhookPath) ??
-      asString(section.webhookPath) ??
-      `/naverworks/${resolvedId}/events`,
+      asString(accountCfg.webhookPath) ?? asString(section.webhookPath) ?? defaultWebhookPath,
     dmPolicy,
     allowFrom: [...asStringList(section.allowFrom), ...asStringList(accountCfg.allowFrom)],
     botName: asString(accountCfg.botName) ?? asString(section.botName) ?? "NAVER WORKS Bot",
@@ -87,5 +124,40 @@ export function resolveAccount(
       (asString(accountCfg.markdownTheme) as NaverWorksAccount["markdownTheme"] | undefined) ??
       (asString(section.markdownTheme) as NaverWorksAccount["markdownTheme"] | undefined) ??
       "auto",
+    autoThinking: {
+      enabled:
+        (accountAutoThinking.enabled as boolean | undefined) ??
+        (sectionAutoThinking.enabled as boolean | undefined) ??
+        false,
+      defaultLevel:
+        asThinkingLevel(accountAutoThinking.defaultLevel) ??
+        asThinkingLevel(sectionAutoThinking.defaultLevel),
+      lowKeywords: [
+        ...asStringList(sectionAutoThinking.lowKeywords),
+        ...asStringList(accountAutoThinking.lowKeywords),
+      ],
+      highKeywords: [
+        ...asStringList(sectionAutoThinking.highKeywords),
+        ...asStringList(accountAutoThinking.highKeywords),
+      ],
+    },
+    statusStickers: {
+      enabled:
+        (accountStatusStickers.enabled as boolean | undefined) ??
+        (sectionStatusStickers.enabled as boolean | undefined) ??
+        false,
+      received:
+        asStickerRef(accountStatusStickers.received) ??
+        asStickerRef(sectionStatusStickers.received) ??
+        DEFAULT_STATUS_STICKERS.received,
+      processing:
+        asStickerRef(accountStatusStickers.processing) ??
+        asStickerRef(sectionStatusStickers.processing) ??
+        DEFAULT_STATUS_STICKERS.processing,
+      failed:
+        asStickerRef(accountStatusStickers.failed) ??
+        asStickerRef(sectionStatusStickers.failed) ??
+        DEFAULT_STATUS_STICKERS.failed,
+    },
   };
 }
