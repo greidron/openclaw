@@ -466,13 +466,13 @@ export type NaverWorksWebhookDeps = {
 
 export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
   const { account, deliver, log } = deps;
-  return async (req: IncomingMessage, res: ServerResponse) => {
+  return async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     log?.info?.(
       `naverworks[${account.accountId}]: webhook request received (${req.method ?? "UNKNOWN"})`,
     );
     if (req.method !== "POST") {
       respondJson(res, 405, { error: "Method not allowed" });
-      return;
+      return true;
     }
 
     let rawBody = "";
@@ -481,7 +481,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     } catch (error) {
       log?.error?.("naverworks: failed reading request body", error);
       respondJson(res, 400, { error: "Invalid body" });
-      return;
+      return true;
     }
 
     if (account.botSecret) {
@@ -491,7 +491,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
       ) {
         log?.warn?.(`naverworks[${account.accountId}]: webhook signature verification failed`);
         respondJson(res, 401, { error: "Invalid signature" });
-        return;
+        return true;
       }
     }
 
@@ -499,7 +499,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     if (!event) {
       log?.warn?.(`naverworks[${account.accountId}]: invalid webhook payload`);
       respondJson(res, 400, { error: "Invalid NAVER WORKS event payload" });
-      return;
+      return true;
     }
 
     if (!event.isDirect) {
@@ -508,13 +508,13 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
         `naverworks[${account.accountId}]: ignored non-direct event from ${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""}`,
       );
       respondJson(res, 200, { ok: true, ignored: "non-direct" });
-      return;
+      return true;
     }
 
     if (account.dmPolicy === "disabled") {
       log?.warn?.(`naverworks[${account.accountId}]: DM blocked by dmPolicy=disabled`);
       respondJson(res, 403, { error: "DM disabled" });
-      return;
+      return true;
     }
 
     if (account.dmPolicy === "allowlist" && account.allowFrom.length > 0) {
@@ -523,7 +523,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
           `naverworks[${account.accountId}]: sender blocked by allowlist (${event.userId}${event.teamId ? ` teamId=${event.teamId}` : ""})`,
         );
         respondJson(res, 403, { error: "Sender not in allowlist" });
-        return;
+        return true;
       }
     }
 
@@ -537,5 +537,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     } catch (error) {
       log?.error?.("naverworks: async deliver failed", error);
     }
+
+    return true;
   };
 }
