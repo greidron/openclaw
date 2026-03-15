@@ -3,7 +3,7 @@ import { resolveAccount } from "./accounts.js";
 import { createNaverWorksPlugin, resolveAutoThinkingDirective } from "./channel.js";
 
 describe("naverworks channel plugin", () => {
-  it("marks account configured when botId + auth are present", async () => {
+  it("treats account as configured for inbound webhook when route path is resolvable", async () => {
     const plugin = createNaverWorksPlugin();
     const account = resolveAccount(
       {
@@ -20,7 +20,7 @@ describe("naverworks channel plugin", () => {
     expect(plugin.config.isConfigured?.(account as never, {} as never)).toBe(true);
   });
 
-  it("marks account unconfigured when outbound auth is missing", async () => {
+  it("still treats account as configured when outbound auth is missing", async () => {
     const plugin = createNaverWorksPlugin();
     const account = resolveAccount(
       {
@@ -33,7 +33,7 @@ describe("naverworks channel plugin", () => {
       "default",
     );
 
-    expect(plugin.config.isConfigured?.(account as never, {} as never)).toBe(false);
+    expect(plugin.config.isConfigured?.(account as never, {} as never)).toBe(true);
   });
 
   it("reports not-configured from outbound sendText", async () => {

@@ -163,6 +163,10 @@ async function sendStatusSticker(params: {
   }
 }
 
+function isNaverWorksInboundConfigured(account: ReturnType<typeof resolveAccount>): boolean {
+  return Boolean(account.webhookPath?.trim());
+}
+
 function hasNaverWorksOutboundAuth(account: ReturnType<typeof resolveAccount>): boolean {
   if (account.accessToken?.trim()) {
     return true;
@@ -264,11 +268,12 @@ export function createNaverWorksPlugin() {
       listAccountIds: (cfg: any) => listAccountIds(cfg),
       resolveAccount: (cfg: any, accountId?: string | null) => resolveAccount(cfg, accountId),
       defaultAccountId: () => DEFAULT_ACCOUNT_ID,
-      isConfigured: (account: ReturnType<typeof resolveAccount>) => isNaverWorksConfigured(account),
+      isConfigured: (account: ReturnType<typeof resolveAccount>) =>
+        isNaverWorksInboundConfigured(account),
       describeAccount: (account: ReturnType<typeof resolveAccount>) => ({
         accountId: account.accountId,
         enabled: account.enabled,
-        configured: isNaverWorksConfigured(account),
+        configured: isNaverWorksInboundConfigured(account),
         dmPolicy: account.dmPolicy,
       }),
       setAccountEnabled: ({ cfg, accountId, enabled }: any) =>
@@ -368,7 +373,7 @@ export function createNaverWorksPlugin() {
         lastError: null,
       },
       buildAccountSnapshot: ({ account, runtime }: any) => {
-        const configured = isNaverWorksConfigured(account);
+        const configured = isNaverWorksInboundConfigured(account);
         return {
           accountId: account.accountId,
           enabled: account.enabled,
