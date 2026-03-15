@@ -28,6 +28,7 @@ import {
   type ResolvedGatewayAuth,
 } from "./auth.js";
 import { normalizeCanvasScopedUrl } from "./canvas-capability.js";
+import { normalizeControlUiBasePath } from "./control-ui-shared.js";
 import {
   handleControlUiAvatarRequest,
   handleControlUiHttpRequest,
@@ -307,6 +308,7 @@ function buildPluginRequestStages(params: {
   req: IncomingMessage;
   res: ServerResponse;
   requestPath: string;
+  controlUiBasePath?: string;
   mattermostSlashCallbackPaths: ReadonlySet<string>;
   pluginPathContext: PluginRoutePathContext | null;
   handlePluginRequest?: PluginHttpRequestHandler;
@@ -319,6 +321,40 @@ function buildPluginRequestStages(params: {
   if (!params.handlePluginRequest) {
     return [];
   }
+
+  const normalizedControlUiBasePath = normalizeControlUiBasePath(params.controlUiBasePath ?? "");
+  const pluginPathContexts: PluginRoutePathContext[] = [];
+  const pushPluginPathContext = (pathname: string) => {
+    const context = resolvePluginRoutePathContext(pathname);
+    if (pluginPathContexts.some((entry) => entry.canonicalPath === context.canonicalPath)) {
+      return;
+    }
+    pluginPathContexts.push(context);
+  };
+
+  pushPluginPathContext(params.requestPath);
+  if (
+    normalizedControlUiBasePath !== "/" &&
+    (params.requestPath === normalizedControlUiBasePath ||
+      params.requestPath.startsWith(`${normalizedControlUiBasePath}/`))
+  ) {
+    const strippedPath =
+      params.requestPath === normalizedControlUiBasePath
+        ? "/"
+        : params.requestPath.slice(normalizedControlUiBasePath.length) || "/";
+    pushPluginPathContext(strippedPath);
+  }
+
+  if (params.pluginPathContext) {
+    if (
+      !pluginPathContexts.some(
+        (entry) => entry.canonicalPath === params.pluginPathContext?.canonicalPath,
+      )
+    ) {
+      pluginPathContexts.unshift(params.pluginPathContext);
+    }
+  }
+
   let pluginGatewayAuthSatisfied = false;
   return [
     {
@@ -327,13 +363,12 @@ function buildPluginRequestStages(params: {
         if (params.mattermostSlashCallbackPaths.has(params.requestPath)) {
           return false;
         }
-        const pathContext =
-          params.pluginPathContext ?? resolvePluginRoutePathContext(params.requestPath);
-        if (
-          !(params.shouldEnforcePluginGatewayAuth ?? shouldEnforceDefaultPluginGatewayAuth)(
+        const requiresGatewayAuth = pluginPathContexts.some((pathContext) =>
+          (params.shouldEnforcePluginGatewayAuth ?? shouldEnforceDefaultPluginGatewayAuth)(
             pathContext,
-          )
-        ) {
+          ),
+        );
+        if (!requiresGatewayAuth) {
           return false;
         }
         const pluginAuthOk = await enforcePluginRouteGatewayAuth({
@@ -353,14 +388,17 @@ function buildPluginRequestStages(params: {
     },
     {
       name: "plugin-http",
-      run: () => {
-        const pathContext =
-          params.pluginPathContext ?? resolvePluginRoutePathContext(params.requestPath);
-        return (
-          params.handlePluginRequest?.(params.req, params.res, pathContext, {
-            gatewayAuthSatisfied: pluginGatewayAuthSatisfied,
-          }) ?? false
-        );
+      run: async () => {
+        for (const pathContext of pluginPathContexts) {
+          const handled =
+            (await params.handlePluginRequest?.(params.req, params.res, pathContext, {
+              gatewayAuthSatisfied: pluginGatewayAuthSatisfied,
+            })) ?? false;
+          if (handled) {
+            return true;
+          }
+        }
+        return false;
       },
     },
   ];
@@ -872,6 +910,7 @@ export function createGatewayHttpServer(opts: {
           req,
           res,
           requestPath,
+          controlUiBasePath,
           mattermostSlashCallbackPaths,
           pluginPathContext,
           handlePluginRequest,
