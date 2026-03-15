@@ -323,6 +323,31 @@ function buildPluginRequestStages(params: {
   }
 
   const normalizedControlUiBasePath = normalizeControlUiBasePath(params.controlUiBasePath ?? "");
+  const resolvePathname = (raw: string): string | undefined => {
+    const value = raw.trim();
+    if (!value) {
+      return undefined;
+    }
+    try {
+      const parsed = new URL(value, "http://localhost");
+      return parsed.pathname;
+    } catch {
+      return undefined;
+    }
+  };
+  const resolveForwardedPathCandidates = (): string[] => {
+    const headerValues = [
+      params.req.headers["x-forwarded-uri"],
+      params.req.headers["x-original-uri"],
+      params.req.headers["x-rewrite-url"],
+    ];
+    const values = headerValues
+      .flatMap((rawValue) => (Array.isArray(rawValue) ? rawValue : rawValue ? [rawValue] : []))
+      .flatMap((value) => value.split(","))
+      .map((value) => resolvePathname(value))
+      .filter((value): value is string => Boolean(value));
+    return [...new Set(values)];
+  };
   const resolveForwardedPrefixes = (): string[] => {
     const raw = params.req.headers["x-forwarded-prefix"];
     if (!raw) {
@@ -344,24 +369,41 @@ function buildPluginRequestStages(params: {
     pluginPathContexts.push(context);
   };
 
-  pushPluginPathContext(params.requestPath);
+  const requestPathCandidates = [params.requestPath, ...resolveForwardedPathCandidates()];
+  const normalizedRequestPathCandidates = [...new Set(requestPathCandidates)];
+  for (const requestPath of normalizedRequestPathCandidates) {
+    pushPluginPathContext(requestPath);
+  }
+
   if (
     normalizedControlUiBasePath !== "/" &&
-    (params.requestPath === normalizedControlUiBasePath ||
-      params.requestPath.startsWith(`${normalizedControlUiBasePath}/`))
+    normalizedRequestPathCandidates.some(
+      (requestPath) =>
+        requestPath === normalizedControlUiBasePath ||
+        requestPath.startsWith(`${normalizedControlUiBasePath}/`),
+    )
   ) {
-    const strippedPath =
-      params.requestPath === normalizedControlUiBasePath
-        ? "/"
-        : params.requestPath.slice(normalizedControlUiBasePath.length) || "/";
-    pushPluginPathContext(strippedPath);
+    for (const requestPath of normalizedRequestPathCandidates) {
+      if (
+        requestPath !== normalizedControlUiBasePath &&
+        !requestPath.startsWith(`${normalizedControlUiBasePath}/`)
+      ) {
+        continue;
+      }
+      const strippedPath =
+        requestPath === normalizedControlUiBasePath
+          ? "/"
+          : requestPath.slice(normalizedControlUiBasePath.length) || "/";
+      pushPluginPathContext(strippedPath);
+    }
   }
 
   for (const prefix of resolveForwardedPrefixes()) {
-    if (params.requestPath === prefix || params.requestPath.startsWith(`${prefix}/`)) {
-      const strippedPath =
-        params.requestPath === prefix ? "/" : params.requestPath.slice(prefix.length) || "/";
-      pushPluginPathContext(strippedPath);
+    for (const requestPath of normalizedRequestPathCandidates) {
+      if (requestPath === prefix || requestPath.startsWith(`${prefix}/`)) {
+        const strippedPath = requestPath === prefix ? "/" : requestPath.slice(prefix.length) || "/";
+        pushPluginPathContext(strippedPath);
+      }
     }
   }
 

@@ -554,6 +554,52 @@ describe("gateway plugin HTTP auth boundary", () => {
     });
   });
 
+  test("passes plugin webhook routes through forwarded original uri headers", async () => {
+    const observedCanonicalPaths: string[] = [];
+    const handlePluginRequest = vi.fn(
+      async (
+        _req: IncomingMessage,
+        res: ServerResponse,
+        pathContext?: { canonicalPath?: string },
+      ) => {
+        const canonicalPath = pathContext?.canonicalPath ?? "";
+        observedCanonicalPaths.push(canonicalPath);
+        if (canonicalPath !== "/naverworks/events") {
+          return false;
+        }
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end("plugin-webhook");
+        return true;
+      },
+    );
+
+    await withPluginGatewayServer({
+      prefix: "openclaw-plugin-http-forwarded-original-uri-webhook-test-",
+      resolvedAuth: AUTH_NONE,
+      overrides: {
+        controlUiEnabled: true,
+        controlUiBasePath: "",
+        controlUiRoot: { kind: "missing" as const },
+        handlePluginRequest,
+      },
+      run: async (server) => {
+        const req = createRequest({
+          path: "/chat",
+          method: "POST",
+          headers: { "x-original-uri": "/naverworks/events" },
+        });
+        const response = createResponse();
+        await dispatchRequest(server, req, response.res);
+
+        expect(response.res.statusCode).toBe(200);
+        expect(response.getBody()).toBe("plugin-webhook");
+        expect(observedCanonicalPaths).toContain("/chat");
+        expect(observedCanonicalPaths).toContain("/naverworks/events");
+      },
+    });
+  });
+
   test("plugin routes take priority over control ui catch-all", async () => {
     const handlePluginRequest = vi.fn(async (req: IncomingMessage, res: ServerResponse) => {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
