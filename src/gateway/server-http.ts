@@ -323,6 +323,18 @@ function buildPluginRequestStages(params: {
   }
 
   const normalizedControlUiBasePath = normalizeControlUiBasePath(params.controlUiBasePath ?? "");
+  const resolveForwardedPrefixes = (): string[] => {
+    const raw = params.req.headers["x-forwarded-prefix"];
+    if (!raw) {
+      return [];
+    }
+    const values = (Array.isArray(raw) ? raw : [raw])
+      .flatMap((value) => value.split(","))
+      .map((value) => normalizeControlUiBasePath(value.trim()))
+      .filter((value) => value.length > 0 && value !== "/");
+    return [...new Set(values)];
+  };
+
   const pluginPathContexts: PluginRoutePathContext[] = [];
   const pushPluginPathContext = (pathname: string) => {
     const context = resolvePluginRoutePathContext(pathname);
@@ -343,6 +355,14 @@ function buildPluginRequestStages(params: {
         ? "/"
         : params.requestPath.slice(normalizedControlUiBasePath.length) || "/";
     pushPluginPathContext(strippedPath);
+  }
+
+  for (const prefix of resolveForwardedPrefixes()) {
+    if (params.requestPath === prefix || params.requestPath.startsWith(`${prefix}/`)) {
+      const strippedPath =
+        params.requestPath === prefix ? "/" : params.requestPath.slice(prefix.length) || "/";
+      pushPluginPathContext(strippedPath);
+    }
   }
 
   if (params.pluginPathContext) {

@@ -8,6 +8,9 @@ import {
   CANONICAL_AUTH_VARIANTS,
   CANONICAL_UNAUTH_VARIANTS,
   createCanonicalizedChannelPluginHandler,
+  createRequest,
+  createResponse,
+  dispatchRequest,
   createHooksHandler,
   createTestGatewayServer,
   expectAuthorizedVariants,
@@ -500,6 +503,52 @@ describe("gateway plugin HTTP auth boundary", () => {
         expect(response.res.statusCode).toBe(200);
         expect(response.getBody()).toBe("plugin-webhook");
         expect(observedCanonicalPaths).toContain("/console/naverworks/events");
+        expect(observedCanonicalPaths).toContain("/naverworks/events");
+      },
+    });
+  });
+
+  test("passes plugin webhook routes through forwarded path prefixes", async () => {
+    const observedCanonicalPaths: string[] = [];
+    const handlePluginRequest = vi.fn(
+      async (
+        _req: IncomingMessage,
+        res: ServerResponse,
+        pathContext?: { canonicalPath?: string },
+      ) => {
+        const canonicalPath = pathContext?.canonicalPath ?? "";
+        observedCanonicalPaths.push(canonicalPath);
+        if (canonicalPath !== "/naverworks/events") {
+          return false;
+        }
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end("plugin-webhook");
+        return true;
+      },
+    );
+
+    await withPluginGatewayServer({
+      prefix: "openclaw-plugin-http-forwarded-prefix-webhook-test-",
+      resolvedAuth: AUTH_NONE,
+      overrides: {
+        controlUiEnabled: true,
+        controlUiBasePath: "",
+        controlUiRoot: { kind: "missing" as const },
+        handlePluginRequest,
+      },
+      run: async (server) => {
+        const req = createRequest({
+          path: "/chat/naverworks/events",
+          method: "POST",
+          headers: { "x-forwarded-prefix": "/chat" },
+        });
+        const response = createResponse();
+        await dispatchRequest(server, req, response.res);
+
+        expect(response.res.statusCode).toBe(200);
+        expect(response.getBody()).toBe("plugin-webhook");
+        expect(observedCanonicalPaths).toContain("/chat/naverworks/events");
         expect(observedCanonicalPaths).toContain("/naverworks/events");
       },
     });
