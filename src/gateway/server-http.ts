@@ -28,7 +28,6 @@ import {
   type ResolvedGatewayAuth,
 } from "./auth.js";
 import { normalizeCanvasScopedUrl } from "./canvas-capability.js";
-import { normalizeControlUiBasePath } from "./control-ui-shared.js";
 import {
   handleControlUiAvatarRequest,
   handleControlUiHttpRequest,
@@ -308,7 +307,6 @@ function buildPluginRequestStages(params: {
   req: IncomingMessage;
   res: ServerResponse;
   requestPath: string;
-  controlUiBasePath?: string;
   mattermostSlashCallbackPaths: ReadonlySet<string>;
   pluginPathContext: PluginRoutePathContext | null;
   handlePluginRequest?: PluginHttpRequestHandler;
@@ -322,101 +320,6 @@ function buildPluginRequestStages(params: {
     return [];
   }
 
-  const normalizedControlUiBasePath = normalizeControlUiBasePath(params.controlUiBasePath ?? "");
-  const resolvePathname = (raw: string): string | undefined => {
-    const value = raw.trim();
-    if (!value) {
-      return undefined;
-    }
-    try {
-      const parsed = new URL(value, "http://localhost");
-      return parsed.pathname;
-    } catch {
-      return undefined;
-    }
-  };
-  const resolveForwardedPathCandidates = (): string[] => {
-    const headerValues = [
-      params.req.headers["x-forwarded-uri"],
-      params.req.headers["x-original-uri"],
-      params.req.headers["x-rewrite-url"],
-    ];
-    const values = headerValues
-      .flatMap((rawValue) => (Array.isArray(rawValue) ? rawValue : rawValue ? [rawValue] : []))
-      .flatMap((value) => value.split(","))
-      .map((value) => resolvePathname(value))
-      .filter((value): value is string => Boolean(value));
-    return [...new Set(values)];
-  };
-  const resolveForwardedPrefixes = (): string[] => {
-    const raw = params.req.headers["x-forwarded-prefix"];
-    if (!raw) {
-      return [];
-    }
-    const values = (Array.isArray(raw) ? raw : [raw])
-      .flatMap((value) => value.split(","))
-      .map((value) => normalizeControlUiBasePath(value.trim()))
-      .filter((value) => value.length > 0 && value !== "/");
-    return [...new Set(values)];
-  };
-
-  const pluginPathContexts: PluginRoutePathContext[] = [];
-  const pushPluginPathContext = (pathname: string) => {
-    const context = resolvePluginRoutePathContext(pathname);
-    if (pluginPathContexts.some((entry) => entry.canonicalPath === context.canonicalPath)) {
-      return;
-    }
-    pluginPathContexts.push(context);
-  };
-
-  const requestPathCandidates = [params.requestPath, ...resolveForwardedPathCandidates()];
-  const normalizedRequestPathCandidates = [...new Set(requestPathCandidates)];
-  for (const requestPath of normalizedRequestPathCandidates) {
-    pushPluginPathContext(requestPath);
-  }
-
-  if (
-    normalizedControlUiBasePath !== "/" &&
-    normalizedRequestPathCandidates.some(
-      (requestPath) =>
-        requestPath === normalizedControlUiBasePath ||
-        requestPath.startsWith(`${normalizedControlUiBasePath}/`),
-    )
-  ) {
-    for (const requestPath of normalizedRequestPathCandidates) {
-      if (
-        requestPath !== normalizedControlUiBasePath &&
-        !requestPath.startsWith(`${normalizedControlUiBasePath}/`)
-      ) {
-        continue;
-      }
-      const strippedPath =
-        requestPath === normalizedControlUiBasePath
-          ? "/"
-          : requestPath.slice(normalizedControlUiBasePath.length) || "/";
-      pushPluginPathContext(strippedPath);
-    }
-  }
-
-  for (const prefix of resolveForwardedPrefixes()) {
-    for (const requestPath of normalizedRequestPathCandidates) {
-      if (requestPath === prefix || requestPath.startsWith(`${prefix}/`)) {
-        const strippedPath = requestPath === prefix ? "/" : requestPath.slice(prefix.length) || "/";
-        pushPluginPathContext(strippedPath);
-      }
-    }
-  }
-
-  if (params.pluginPathContext) {
-    if (
-      !pluginPathContexts.some(
-        (entry) => entry.canonicalPath === params.pluginPathContext?.canonicalPath,
-      )
-    ) {
-      pluginPathContexts.unshift(params.pluginPathContext);
-    }
-  }
-
   let pluginGatewayAuthSatisfied = false;
   return [
     {
@@ -425,12 +328,13 @@ function buildPluginRequestStages(params: {
         if (params.mattermostSlashCallbackPaths.has(params.requestPath)) {
           return false;
         }
-        const requiresGatewayAuth = pluginPathContexts.some((pathContext) =>
-          (params.shouldEnforcePluginGatewayAuth ?? shouldEnforceDefaultPluginGatewayAuth)(
+        const pathContext =
+          params.pluginPathContext ?? resolvePluginRoutePathContext(params.requestPath);
+        if (
+          !(params.shouldEnforcePluginGatewayAuth ?? shouldEnforceDefaultPluginGatewayAuth)(
             pathContext,
-          ),
-        );
-        if (!requiresGatewayAuth) {
+          )
+        ) {
           return false;
         }
         const pluginAuthOk = await enforcePluginRouteGatewayAuth({
@@ -450,17 +354,14 @@ function buildPluginRequestStages(params: {
     },
     {
       name: "plugin-http",
-      run: async () => {
-        for (const pathContext of pluginPathContexts) {
-          const handled =
-            (await params.handlePluginRequest?.(params.req, params.res, pathContext, {
-              gatewayAuthSatisfied: pluginGatewayAuthSatisfied,
-            })) ?? false;
-          if (handled) {
-            return true;
-          }
-        }
-        return false;
+      run: () => {
+        const pathContext =
+          params.pluginPathContext ?? resolvePluginRoutePathContext(params.requestPath);
+        return (
+          params.handlePluginRequest?.(params.req, params.res, pathContext, {
+            gatewayAuthSatisfied: pluginGatewayAuthSatisfied,
+          }) ?? false
+        );
       },
     },
   ];
@@ -972,7 +873,6 @@ export function createGatewayHttpServer(opts: {
           req,
           res,
           requestPath,
-          controlUiBasePath,
           mattermostSlashCallbackPaths,
           pluginPathContext,
           handlePluginRequest,
