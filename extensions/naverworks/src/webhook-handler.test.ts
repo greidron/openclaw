@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseNaverWorksInbound, verifyNaverWorksSignature } from "./webhook-handler.js";
+import {
+  createNaverWorksWebhookHandler,
+  parseNaverWorksInbound,
+  verifyNaverWorksSignature,
+} from "./webhook-handler.js";
 
 describe("parseNaverWorksInbound", () => {
   it("parses direct message payload with team + user ids", () => {
@@ -258,5 +262,59 @@ describe("verifyNaverWorksSignature", () => {
         headerSignature: "invalid-signature",
       }),
     ).toBe(false);
+  });
+});
+
+describe("createNaverWorksWebhookHandler", () => {
+  function createResponseRecorder() {
+    const response = {
+      statusCode: 0,
+      headers: {} as Record<string, string>,
+      body: "",
+      writeHead(code: number, headers: Record<string, string>) {
+        this.statusCode = code;
+        this.headers = headers;
+        return this;
+      },
+      end(payload?: string) {
+        this.body = payload ?? "";
+        return this;
+      },
+    };
+    return response;
+  }
+
+  it("responds 200 for GET webhook probes", async () => {
+    const deliver = async () => {
+      throw new Error("deliver should not run for GET");
+    };
+    const handler = createNaverWorksWebhookHandler({
+      account: { accountId: "default", dmPolicy: "all", allowFrom: [] } as never,
+      deliver,
+    });
+    const req = { method: "GET" } as never;
+    const res = createResponseRecorder() as never;
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe(JSON.stringify({ ok: true, mode: "webhook" }));
+  });
+
+  it("responds 200 for HEAD webhook probes", async () => {
+    const deliver = async () => {
+      throw new Error("deliver should not run for HEAD");
+    };
+    const handler = createNaverWorksWebhookHandler({
+      account: { accountId: "default", dmPolicy: "all", allowFrom: [] } as never,
+      deliver,
+    });
+    const req = { method: "HEAD" } as never;
+    const res = createResponseRecorder() as never;
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe(JSON.stringify({ ok: true, mode: "webhook" }));
   });
 });

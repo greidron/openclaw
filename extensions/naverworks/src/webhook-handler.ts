@@ -470,6 +470,14 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     log?.info?.(
       `naverworks[${account.accountId}]: webhook request received (${req.method ?? "UNKNOWN"})`,
     );
+    if (req.method === "GET" || req.method === "HEAD") {
+      // Some webhook consoles probe configured endpoints with GET/HEAD before
+      // sending POST events. Keep these methods lightweight and explicit so
+      // the request does not fall through to any unrelated HTTP fallback.
+      respondJson(res, 200, { ok: true, mode: "webhook" });
+      return;
+    }
+
     if (req.method !== "POST") {
       respondJson(res, 405, { error: "Method not allowed" });
       return;
