@@ -447,6 +447,10 @@ export function createNaverWorksPlugin() {
         const unregister = registerPluginHttpRoute({
           path: account.webhookPath,
           auth: "plugin",
+          // Align with other webhook-based channels (for example Line/Synology Chat)
+          // so stale runtime routes get replaced on restart/reload instead of silently
+          // leaving the endpoint unclaimed and falling through to Control UI.
+          replaceExisting: true,
           pluginId: CHANNEL_ID,
           accountId: account.accountId,
           log: (line: string) => log?.info?.(line),
