@@ -444,20 +444,34 @@ export function createNaverWorksPlugin() {
           },
         });
 
-        const unregister = registerPluginHttpRoute({
+        const unregisterExact = registerPluginHttpRoute({
           path: account.webhookPath,
           auth: "plugin",
-          // Align with other webhook-based channels (for example Line/Synology Chat)
-          // so stale runtime routes get replaced on restart/reload instead of silently
-          // leaving the endpoint unclaimed and falling through to Control UI.
+          // Keep exact match for the configured webhook endpoint.
           replaceExisting: true,
           pluginId: CHANNEL_ID,
           accountId: account.accountId,
           log: (line: string) => log?.info?.(line),
           handler,
         });
+        const unregisterPrefix = registerPluginHttpRoute({
+          path: account.webhookPath,
+          auth: "plugin",
+          // Mirror A2UI-style resilience by also accepting canonical descendants
+          // (for example trailing slash or provider-added probe suffixes).
+          match: "prefix",
+          replaceExisting: true,
+          pluginId: CHANNEL_ID,
+          accountId: account.accountId,
+          log: (line: string) => log?.info?.(line),
+          handler,
+        });
+        const unregister = () => {
+          unregisterPrefix();
+          unregisterExact();
+        };
         log?.info?.(
-          `naverworks[${account.accountId}]: webhook route registered at ${account.webhookPath}`,
+          `naverworks[${account.accountId}]: webhook routes registered (exact+prefix) at ${account.webhookPath}`,
         );
         activeRouteUnregisters.set(routeKey, unregister);
         ctx.setStatus({ connected: true, lastError: null });
