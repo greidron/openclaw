@@ -10,6 +10,7 @@ import { z } from "zod";
 import { listAccountIds, resolveAccount } from "./accounts.js";
 import { getNaverWorksRuntime } from "./runtime.js";
 import { resolveNaverWorksAccessToken, sendMessageNaverWorks } from "./send.js";
+import type { NaverWorksAccount } from "./types.js";
 import { createNaverWorksWebhookHandler } from "./webhook-handler.js";
 
 const CHANNEL_ID = "naverworks";
@@ -39,6 +40,16 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
 );
 
 const activeRouteUnregisters = new Map<string, () => void>();
+
+export function resolveWebhookRegistrationPaths(account: NaverWorksAccount): string[] {
+  const paths = new Set<string>([account.webhookPath]);
+  // Backward-compatible alias for legacy single-account setups that still
+  // point webhook callbacks at the old default endpoint.
+  if (account.accountId === DEFAULT_ACCOUNT_ID) {
+    paths.add("/naverworks/events");
+  }
+  return [...paths];
+}
 
 function hasNaverWorksOutboundAuth(account: ReturnType<typeof resolveAccount>): boolean {
   if (account.accessToken?.trim()) {
@@ -444,34 +455,43 @@ export function createNaverWorksPlugin() {
           },
         });
 
-        const unregisterExact = registerPluginHttpRoute({
-          path: account.webhookPath,
-          auth: "plugin",
-          // Keep exact match for the configured webhook endpoint.
-          replaceExisting: true,
-          pluginId: CHANNEL_ID,
-          accountId: account.accountId,
-          log: (line: string) => log?.info?.(line),
-          handler,
-        });
-        const unregisterPrefix = registerPluginHttpRoute({
-          path: account.webhookPath,
-          auth: "plugin",
-          // Mirror A2UI-style resilience by also accepting canonical descendants
-          // (for example trailing slash or provider-added probe suffixes).
-          match: "prefix",
-          replaceExisting: true,
-          pluginId: CHANNEL_ID,
-          accountId: account.accountId,
-          log: (line: string) => log?.info?.(line),
-          handler,
-        });
+        const registrationPaths = resolveWebhookRegistrationPaths(account);
+        const unregisters: Array<() => void> = [];
+        for (const path of registrationPaths) {
+          unregisters.push(
+            registerPluginHttpRoute({
+              path,
+              auth: "plugin",
+              // Keep exact match for the configured webhook endpoint.
+              replaceExisting: true,
+              pluginId: CHANNEL_ID,
+              accountId: account.accountId,
+              log: (line: string) => log?.info?.(line),
+              handler,
+            }),
+          );
+          unregisters.push(
+            registerPluginHttpRoute({
+              path,
+              auth: "plugin",
+              // Mirror A2UI-style resilience by also accepting canonical descendants
+              // (for example trailing slash or provider-added probe suffixes).
+              match: "prefix",
+              replaceExisting: true,
+              pluginId: CHANNEL_ID,
+              accountId: account.accountId,
+              log: (line: string) => log?.info?.(line),
+              handler,
+            }),
+          );
+        }
         const unregister = () => {
-          unregisterPrefix();
-          unregisterExact();
+          for (const unregisterRoute of unregisters.reverse()) {
+            unregisterRoute();
+          }
         };
         log?.info?.(
-          `naverworks[${account.accountId}]: webhook routes registered (exact+prefix) at ${account.webhookPath}`,
+          `naverworks[${account.accountId}]: webhook routes registered at ${registrationPaths.join(", ")}`,
         );
         activeRouteUnregisters.set(routeKey, unregister);
         ctx.setStatus({ connected: true, lastError: null });

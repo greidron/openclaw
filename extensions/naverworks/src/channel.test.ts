@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveAccount } from "./accounts.js";
-import { createNaverWorksPlugin } from "./channel.js";
+import { createNaverWorksPlugin, resolveWebhookRegistrationPaths } from "./channel.js";
 
 describe("naverworks channel plugin", () => {
   it("marks account configured when botId + auth are present", async () => {
@@ -49,5 +49,29 @@ describe("naverworks channel plugin", () => {
         text: "hello",
       }),
     ).rejects.toThrow(/not configured for outbound delivery/i);
+  });
+
+  it("includes legacy webhook alias for default account", () => {
+    const account = resolveAccount({ channels: { naverworks: {} } }, "default");
+    expect(resolveWebhookRegistrationPaths(account)).toEqual([
+      "/naverworks/default/events",
+      "/naverworks/events",
+    ]);
+  });
+
+  it("does not include legacy webhook alias for non-default account", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            accounts: {
+              ops: {},
+            },
+          },
+        },
+      },
+      "ops",
+    );
+    expect(resolveWebhookRegistrationPaths(account)).toEqual(["/naverworks/ops/events"]);
   });
 });
