@@ -475,6 +475,7 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
       // events. Keep these methods lightweight and explicit so requests do not
       // fall through to any unrelated HTTP fallback.
       if (req.method === "OPTIONS") {
+        log?.info?.(`naverworks[${account.accountId}]: responding to webhook preflight (OPTIONS)`);
         res.writeHead(200, {
           Allow: "GET,HEAD,OPTIONS,POST",
           "Content-Type": "application/json",
@@ -482,14 +483,20 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
         res.end(JSON.stringify({ ok: true, mode: "webhook" }));
         return;
       }
+      log?.info?.(`naverworks[${account.accountId}]: responding to webhook probe (${req.method})`);
       respondJson(res, 200, { ok: true, mode: "webhook" });
       return;
     }
 
     if (req.method !== "POST") {
+      log?.warn?.(
+        `naverworks[${account.accountId}]: rejected unsupported webhook method ${req.method ?? "UNKNOWN"}`,
+      );
       respondJson(res, 405, { error: "Method not allowed" });
       return;
     }
+
+    log?.info?.(`naverworks[${account.accountId}]: processing webhook POST request`);
 
     let rawBody = "";
     try {
