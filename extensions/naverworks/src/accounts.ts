@@ -21,6 +21,33 @@ function normalizePrivateKey(value: string | undefined): string | undefined {
   return value.replace(/\\n/g, "\n");
 }
 
+function normalizeWebhookPath(value: string | undefined, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const rawPath = /^https?:\/\//i.test(trimmed)
+    ? (() => {
+        try {
+          return new URL(trimmed).pathname || "/";
+        } catch {
+          return fallback;
+        }
+      })()
+    : trimmed;
+
+  const withLeadingSlash = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+  if (withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")) {
+    return withLeadingSlash.slice(0, -1);
+  }
+  return withLeadingSlash;
+}
+
 export function listAccountIds(cfg: Record<string, unknown>): string[] {
   const section = ((cfg as any)?.channels?.naverworks ?? {}) as Record<string, unknown>;
   const accounts = (section.accounts ?? {}) as Record<string, unknown>;
@@ -48,10 +75,10 @@ export function resolveAccount(
       (accountCfg.enabled as boolean | undefined) ??
       (section.enabled as boolean | undefined) ??
       true,
-    webhookPath:
-      asString(accountCfg.webhookPath) ??
-      asString(section.webhookPath) ??
+    webhookPath: normalizeWebhookPath(
+      asString(accountCfg.webhookPath) ?? asString(section.webhookPath),
       `/naverworks/${resolvedId}/events`,
+    ),
     dmPolicy,
     allowFrom: [...asStringList(section.allowFrom), ...asStringList(accountCfg.allowFrom)],
     botName: asString(accountCfg.botName) ?? asString(section.botName) ?? "NAVER WORKS Bot",

@@ -317,4 +317,21 @@ describe("createNaverWorksWebhookHandler", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe(JSON.stringify({ ok: true, mode: "webhook" }));
   });
+  it("responds 200 for OPTIONS webhook probes", async () => {
+    const deliver = async () => {
+      throw new Error("deliver should not run for OPTIONS");
+    };
+    const handler = createNaverWorksWebhookHandler({
+      account: { accountId: "default", dmPolicy: "all", allowFrom: [] } as never,
+      deliver,
+    });
+    const req = { method: "OPTIONS" } as never;
+    const res = createResponseRecorder() as never;
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers.Allow).toBe("GET,HEAD,OPTIONS,POST");
+    expect(res.body).toBe(JSON.stringify({ ok: true, mode: "webhook" }));
+  });
 });

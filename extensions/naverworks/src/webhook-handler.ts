@@ -470,10 +470,18 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
     log?.info?.(
       `naverworks[${account.accountId}]: webhook request received (${req.method ?? "UNKNOWN"})`,
     );
-    if (req.method === "GET" || req.method === "HEAD") {
-      // Some webhook consoles probe configured endpoints with GET/HEAD before
-      // sending POST events. Keep these methods lightweight and explicit so
-      // the request does not fall through to any unrelated HTTP fallback.
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+      // Some webhook consoles probe configured endpoints before sending POST
+      // events. Keep these methods lightweight and explicit so requests do not
+      // fall through to any unrelated HTTP fallback.
+      if (req.method === "OPTIONS") {
+        res.writeHead(200, {
+          Allow: "GET,HEAD,OPTIONS,POST",
+          "Content-Type": "application/json",
+        });
+        res.end(JSON.stringify({ ok: true, mode: "webhook" }));
+        return;
+      }
       respondJson(res, 200, { ok: true, mode: "webhook" });
       return;
     }

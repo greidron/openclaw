@@ -141,4 +141,34 @@ describe("resolveAccount", () => {
 
     expect(account.markdownMode).toBe("auto-flex");
   });
+
+  it("normalizes webhookPath from full URL", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            webhookPath: "https://example.com/naverworks/default/events/",
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.webhookPath).toBe("/naverworks/default/events");
+  });
+
+  it("normalizes webhookPath with leading slash and no trailing slash", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            webhookPath: "naverworks/default/events/",
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.webhookPath).toBe("/naverworks/default/events");
+  });
 });
