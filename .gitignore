@@ -118,6 +118,8 @@ USER.md
 *.zip
 .idea
 .vscode/
+openclaw-image.tar
+docker-build-and-save-image.sh
 
 # local tooling
 .antigravitycli/
