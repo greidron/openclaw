@@ -199,6 +199,14 @@ export const mockedBuildEmbeddedRunPayloads = vi.fn<
     ...args: Parameters<typeof buildEmbeddedRunPayloads>
   ) => ReturnType<typeof buildEmbeddedRunPayloads>
 >(() => []);
+export const mockedResolveLiveSessionModelSelection = vi.fn(() => null);
+export const mockedConsumeLiveSessionModelSwitch = vi.fn(() => undefined);
+export const mockedHasDifferentLiveSessionModelSelection = vi.fn(
+  (
+    current: { provider: string; model: string },
+    next: { provider: string; model: string } | null,
+  ) => Boolean(next) && (current.provider !== next.provider || current.model !== next.model),
+);
 export const mockedRunContextEngineMaintenance = vi.fn(async () => undefined);
 export const mockedWaitForDeferredTurnMaintenanceForSession = vi.fn(
   async (_sessionKey?: string) => undefined,
@@ -449,6 +457,17 @@ export function resetRunOverflowCompactionHarnessMocks(): void {
   mockedRunEmbeddedAttempt.mockReset();
   mockedBuildEmbeddedRunPayloads.mockReset();
   mockedBuildEmbeddedRunPayloads.mockReturnValue([]);
+  mockedResolveLiveSessionModelSelection.mockReset();
+  mockedResolveLiveSessionModelSelection.mockReturnValue(null);
+  mockedConsumeLiveSessionModelSwitch.mockReset();
+  mockedConsumeLiveSessionModelSwitch.mockReturnValue(undefined);
+  mockedHasDifferentLiveSessionModelSelection.mockReset();
+  mockedHasDifferentLiveSessionModelSelection.mockImplementation(
+    (
+      current: { provider: string; model: string },
+      next: { provider: string; model: string } | null,
+    ) => Boolean(next) && (current.provider !== next.provider || current.model !== next.model),
+  );
   mockedRunContextEngineMaintenance.mockReset();
   mockedRunContextEngineMaintenance.mockResolvedValue(undefined);
   mockedWaitForDeferredTurnMaintenanceForSession.mockReset();
@@ -669,6 +688,17 @@ export async function loadRunOverflowCompactionHarness(): Promise<{
       return runtime || undefined;
     },
   }));
+
+  vi.doMock("../live-model-switch.js", async () => {
+    const actual =
+      await vi.importActual<typeof import("../live-model-switch.js")>("../live-model-switch.js");
+    return {
+      ...actual,
+      resolveLiveSessionModelSelection: mockedResolveLiveSessionModelSelection,
+      consumeLiveSessionModelSwitch: mockedConsumeLiveSessionModelSwitch,
+      hasDifferentLiveSessionModelSelection: mockedHasDifferentLiveSessionModelSelection,
+    };
+  });
 
   vi.doMock("../../plugins/provider-runtime.js", () => ({
     prepareProviderRuntimeAuth: mockedPrepareProviderRuntimeAuth,

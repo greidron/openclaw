@@ -523,6 +523,12 @@ export function runAgentAttempt(params: {
           cliSessionId: getCliSessionBinding(params.sessionEntry, "claude-cli")?.sessionId,
         })
       : "";
+  log.info(
+    `[fallback-attempt] sessionId=${params.sessionId} sessionKey=${params.sessionKey ?? "-"} ` +
+      `provider=${params.providerOverride}/${params.modelOverride} ` +
+      `isFallbackRetry=${params.isFallbackRetry ? "yes" : "no"} ` +
+      `suppressPersistedLiveModelSelection=${params.isFallbackRetry ? "yes" : "no"}`,
+  );
   const resolvedPrompt = resolveFallbackRetryPrompt({
     body: params.body,
     isFallbackRetry: params.isFallbackRetry,
