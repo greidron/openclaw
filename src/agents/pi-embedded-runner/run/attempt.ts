@@ -966,7 +966,19 @@ export async function runEmbeddedAttempt(
           `embedded agent transport override: ${activeSession.agent.transport} -> ${agentTransportOverride} ` +
             `(${params.provider}/${params.modelId})`,
         );
-        activeSession.agent.setTransport(agentTransportOverride);
+        const setTransport = (
+          activeSession.agent as {
+            setTransport?: (transport: typeof agentTransportOverride) => void;
+          }
+        ).setTransport;
+        if (typeof setTransport === "function") {
+          setTransport.call(activeSession.agent, agentTransportOverride);
+        } else {
+          log.debug(
+            `embedded agent transport override unsupported by installed pi runtime; keeping ${activeSession.agent.transport} ` +
+              `(${params.provider}/${params.modelId})`,
+          );
+        }
       }
 
       if (cacheTrace) {
