@@ -20,12 +20,7 @@ import {
   resolveOllamaCompatNumCtxEnabled,
   shouldInjectOllamaCompatNumCtx,
   wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama.js";
-import { resolveSignalReactionLevel } from "../../../plugin-sdk/signal.js";
-import {
-  resolveTelegramInlineButtonsScope,
-  resolveTelegramReactionLevel,
-} from "../../../plugin-sdk/telegram-runtime.js";
+} from "../../../plugin-sdk/ollama-runtime.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
@@ -97,21 +92,16 @@ import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { sanitizeToolCallIdsForCloudCodeAssist } from "../../tool-call-id.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
-import { shouldTraceProviderAuth, summarizeProviderAuthKey } from "../../xai-auth-trace.js";
 import { isRunnerAbortError } from "../abort.js";
 import { isCacheTtlEligibleProvider } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
 import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
 import { buildEmbeddedExtensionFactories } from "../extensions.js";
 import { applyExtraParamsToAgent, resolveAgentTransportOverride } from "../extra-params.js";
-import {
-  logToolSchemasForGoogle,
-  sanitizeSessionHistory,
-  sanitizeToolsForGoogle,
-} from "../google.js";
 import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "../history.js";
 import { log } from "../logger.js";
 import { buildEmbeddedMessageActionDiscoveryInput } from "../message-action-discovery-input.js";
+import { sanitizeSessionHistory } from "../replay-history.js";
 import {
   clearActiveEmbeddedRun,
   type EmbeddedPiQueueHandle,
@@ -178,6 +168,7 @@ import {
 } from "./compaction-timeout.js";
 import { pruneProcessedHistoryImages } from "./history-image-prune.js";
 import { detectAndLoadPromptImages } from "./images.js";
+import { buildAttemptReplayMetadata } from "./incomplete-turn.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
 export {
@@ -204,7 +195,7 @@ export {
   resolveOllamaCompatNumCtxEnabled,
   shouldInjectOllamaCompatNumCtx,
   wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama.js";
+} from "../../../plugin-sdk/ollama-runtime.js";
 export {
   decodeHtmlEntitiesInObject,
   wrapStreamFnRepairMalformedToolCallArguments,
@@ -215,6 +206,46 @@ export {
 } from "./attempt.tool-call-normalization.js";
 
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
+
+function resolveTelegramInlineButtonsScope(_params: {
+  cfg: unknown;
+  accountId?: string;
+}): "off" | "dm" | "group" | "all" | "allowlist" {
+  return "off";
+}
+
+function resolveTelegramReactionLevel(_params: { cfg: unknown; accountId?: string }): {
+  agentReactionGuidance?: "minimal" | "extensive";
+} {
+  return {};
+}
+
+function resolveSignalReactionLevel(_params: { cfg: unknown; accountId?: string }): {
+  agentReactionGuidance?: "minimal" | "extensive";
+} {
+  return {};
+}
+
+function shouldTraceProviderAuth(provider: string): boolean {
+  return provider === "xai";
+}
+
+function summarizeProviderAuthKey(apiKey: string | undefined): string {
+  const normalized = (apiKey ?? "").trim();
+  if (!normalized) {
+    return "absent";
+  }
+  if (normalized.length <= 8) {
+    return "***";
+  }
+  return `${normalized.slice(0, 4)}…${normalized.slice(-4)}`;
+}
+
+function sanitizeToolsForGoogle<T>(params: { tools: T[]; provider: string }): T[] {
+  return params.tools;
+}
+
+function logToolSchemasForGoogle(_params: { tools: unknown[]; provider: string }): void {}
 
 export function resolveEmbeddedAgentStreamFn(params: {
   currentStreamFn: StreamFn | undefined;
@@ -1819,8 +1850,10 @@ export async function runEmbeddedAttempt(
       return {
         aborted,
         timedOut,
+        idleTimedOut: false,
         timedOutDuringCompaction,
         promptError,
+        promptErrorSource,
         sessionIdUsed,
         bootstrapPromptWarningSignaturesSeen: bootstrapPromptWarning.warningSignaturesSeen,
         bootstrapPromptWarningSignature: bootstrapPromptWarning.signature,
@@ -1840,6 +1873,16 @@ export async function runEmbeddedAttempt(
         ),
         attemptUsage: getUsageTotals(),
         compactionCount: getCompactionCount(),
+        replayMetadata: buildAttemptReplayMetadata({
+          toolMetas: toolMetasNormalized,
+          didSendViaMessagingTool: didSendViaMessagingTool(),
+          successfulCronAdds: getSuccessfulCronAdds(),
+        }),
+        itemLifecycle: {
+          startedCount: toolMetasNormalized.length,
+          completedCount: toolMetasNormalized.length,
+          activeCount: 0,
+        },
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
         yieldDetected: yieldDetected || undefined,
