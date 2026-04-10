@@ -193,18 +193,13 @@ export function isReasoningConstraintErrorMessage(raw: string): boolean {
   if (!raw) {
     return false;
   }
-  const lower = raw.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(raw);
   return (
     lower.includes("reasoning is mandatory") ||
     lower.includes("reasoning is required") ||
     lower.includes("requires reasoning") ||
     (lower.includes("reasoning") && lower.includes("cannot be disabled"))
   );
-}
-
-function hasRateLimitTpmHint(raw: string): boolean {
-  const lower = normalizeLowercaseStringOrEmpty(raw);
-  return /\btpm\b/i.test(lower) || lower.includes("tokens per minute");
 }
 
 function isInvalidStreamingEventOrderError(raw: string): boolean {
@@ -217,6 +212,11 @@ function isInvalidStreamingEventOrderError(raw: string): boolean {
     lower.includes("message_start") &&
     lower.includes("message_stop")
   );
+}
+
+function hasRateLimitTpmHint(raw: string): boolean {
+  const lower = normalizeLowercaseStringOrEmpty(raw);
+  return /\btpm\b/i.test(lower) || lower.includes("tokens per minute");
 }
 
 export function isContextOverflowError(errorMessage?: string): boolean {
@@ -266,6 +266,7 @@ export function isContextOverflowError(errorMessage?: string): boolean {
     errorMessage.includes("上下文长度超") ||
     errorMessage.includes("超出最大上下文") ||
     errorMessage.includes("请压缩上下文") ||
+    // Provider-specific patterns (Bedrock, Azure, Ollama, Mistral, Cohere, etc.)
     matchesProviderContextOverflow(errorMessage)
   );
 }
@@ -319,7 +320,7 @@ export function isCompactionFailureError(errorMessage?: string): boolean {
   if (!errorMessage) {
     return false;
   }
-  const lower = errorMessage.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(errorMessage);
   const hasCompactionTerm =
     lower.includes("summarization failed") ||
     lower.includes("auto-compaction") ||
@@ -388,6 +389,22 @@ const HTTP_ERROR_HINTS = [
 ];
 
 type PaymentRequiredFailoverReason = Extract<FailoverReason, "billing" | "rate_limit">;
+
+export type FailoverSignal = {
+  status?: number;
+  code?: string;
+  message?: string;
+  provider?: string;
+};
+
+export type FailoverClassification =
+  | {
+      kind: "reason";
+      reason: FailoverReason;
+    }
+  | {
+      kind: "context_overflow";
+    };
 
 const BILLING_402_HINTS = [
   "insufficient credits",
@@ -560,6 +577,8 @@ function classifyFailoverClassificationFromHttpStatus(
     if (message && isAuthPermanentErrorMessage(message)) {
       return toReasonClassification("auth_permanent");
     }
+    // billing message on 401/403 takes precedence over generic auth (e.g. OpenRouter
+    // "Key limit exceeded" 401/403 should trigger model fallback, not auth)
     if (messageReason === "billing") {
       return toReasonClassification("billing");
     }
@@ -569,6 +588,7 @@ function classifyFailoverClassificationFromHttpStatus(
     return toReasonClassification("timeout");
   }
   if (status === 410) {
+    // Generic 410/no-body responses behave like transport failures, not session expiry.
     if (
       messageReason === "session_expired" ||
       messageReason === "billing" ||
@@ -612,6 +632,9 @@ function classifyFailoverClassificationFromHttpStatus(
     return toReasonClassification("overloaded");
   }
   if (status === 400 || status === 422) {
+    // 400/422 are ambiguous: inspect the payload first so provider-specific
+    // rate limits, auth failures, model-not-found errors, and billing signals
+    // are not collapsed into generic "format" failures.
     if (messageClassification) {
       return messageClassification;
     }
@@ -620,11 +643,189 @@ function classifyFailoverClassificationFromHttpStatus(
   return null;
 }
 
-function stripFinalTagsFromText(text: string): string {
-  if (!text) {
-    return text;
+function classifyFailoverReasonFromCode(raw: string | undefined): FailoverReason | null {
+  const normalized = raw?.trim().toUpperCase();
+  if (!normalized) {
+    return null;
   }
-  return text.replace(FINAL_TAG_RE, "");
+  switch (normalized) {
+    case "RESOURCE_EXHAUSTED":
+    case "RATE_LIMIT":
+    case "RATE_LIMITED":
+    case "RATE_LIMIT_EXCEEDED":
+    case "TOO_MANY_REQUESTS":
+    case "THROTTLED":
+    case "THROTTLING":
+    case "THROTTLINGEXCEPTION":
+    case "THROTTLING_EXCEPTION":
+      return "rate_limit";
+    case "OVERLOADED":
+    case "OVERLOADED_ERROR":
+      return "overloaded";
+    default:
+      return TIMEOUT_ERROR_CODES.has(normalized) ? "timeout" : null;
+  }
+}
+
+function isProvider(provider: string | undefined, match: string): boolean {
+  const normalized = normalizeOptionalLowercaseString(provider);
+  return Boolean(normalized && normalized.includes(match));
+}
+
+function isAnthropicGenericUnknownError(raw: string, provider?: string): boolean {
+  return (
+    isProvider(provider, "anthropic") &&
+    (normalizeOptionalLowercaseString(raw)?.includes("an unknown error occurred") ?? false)
+  );
+}
+
+function isOpenRouterProviderReturnedError(raw: string, provider?: string): boolean {
+  return (
+    isProvider(provider, "openrouter") &&
+    (normalizeOptionalLowercaseString(raw)?.includes("provider returned error") ?? false)
+  );
+}
+
+function isOpenRouterKeyLimitExceededError(raw: string, provider?: string): boolean {
+  return (
+    isProvider(provider, "openrouter") && /\bkey\s+limit\s*(?:exceeded|reached|hit)\b/i.test(raw)
+  );
+}
+
+function classifyFailoverClassificationFromMessage(
+  raw: string,
+  provider?: string,
+): FailoverClassification | null {
+  if (isImageDimensionErrorMessage(raw)) {
+    return null;
+  }
+  if (isImageSizeError(raw)) {
+    return null;
+  }
+  if (isCliSessionExpiredErrorMessage(raw)) {
+    return toReasonClassification("session_expired");
+  }
+  if (isModelNotFoundErrorMessage(raw)) {
+    return toReasonClassification("model_not_found");
+  }
+  if (isContextOverflowError(raw)) {
+    return { kind: "context_overflow" };
+  }
+  const reasonFrom402Text = classifyFailoverReasonFrom402Text(raw);
+  if (reasonFrom402Text) {
+    return toReasonClassification(reasonFrom402Text);
+  }
+  if (isOpenRouterKeyLimitExceededError(raw, provider)) {
+    return toReasonClassification("billing");
+  }
+  if (isPeriodicUsageLimitErrorMessage(raw)) {
+    return toReasonClassification(isBillingErrorMessage(raw) ? "billing" : "rate_limit");
+  }
+  if (isRateLimitErrorMessage(raw)) {
+    return toReasonClassification("rate_limit");
+  }
+  if (isOverloadedErrorMessage(raw)) {
+    return toReasonClassification("overloaded");
+  }
+  if (isTransientHttpError(raw)) {
+    const status = extractLeadingHttpStatus(raw.trim());
+    if (status?.code === 529) {
+      return toReasonClassification("overloaded");
+    }
+    return toReasonClassification("timeout");
+  }
+  // Billing and auth classifiers run before the broad isJsonApiInternalServerError
+  // check so that provider errors like {"type":"api_error","message":"insufficient
+  // balance"} are correctly classified as "billing"/"auth" rather than "timeout".
+  if (isBillingErrorMessage(raw)) {
+    return toReasonClassification("billing");
+  }
+  if (isAuthPermanentErrorMessage(raw)) {
+    return toReasonClassification("auth_permanent");
+  }
+  if (isAuthErrorMessage(raw)) {
+    return toReasonClassification("auth");
+  }
+  if (isAnthropicGenericUnknownError(raw, provider)) {
+    return toReasonClassification("timeout");
+  }
+  if (isOpenRouterProviderReturnedError(raw, provider)) {
+    return toReasonClassification("timeout");
+  }
+  if (isServerErrorMessage(raw)) {
+    return toReasonClassification("timeout");
+  }
+  if (isJsonApiInternalServerError(raw)) {
+    return toReasonClassification("timeout");
+  }
+  if (isCloudCodeAssistFormatError(raw)) {
+    return toReasonClassification("format");
+  }
+  if (isTimeoutErrorMessage(raw)) {
+    return toReasonClassification("timeout");
+  }
+  // Provider-specific patterns as a final catch (Bedrock, Groq, Together AI, etc.)
+  const providerSpecific = classifyProviderSpecificError(raw);
+  if (providerSpecific) {
+    return toReasonClassification(providerSpecific);
+  }
+  return null;
+}
+
+export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassification | null {
+  const inferredStatus =
+    typeof signal.status === "number" && Number.isFinite(signal.status)
+      ? signal.status
+      : extractLeadingHttpStatus(signal.message?.trim() ?? "")?.code;
+  const messageClassification = signal.message
+    ? classifyFailoverClassificationFromMessage(signal.message, signal.provider)
+    : null;
+  const statusClassification = classifyFailoverClassificationFromHttpStatus(
+    inferredStatus,
+    signal.message,
+    messageClassification,
+  );
+  if (statusClassification) {
+    return statusClassification;
+  }
+  const codeReason = classifyFailoverReasonFromCode(signal.code);
+  if (codeReason) {
+    return toReasonClassification(codeReason);
+  }
+  return messageClassification;
+}
+
+function coerceText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value == null) {
+    return "";
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint" ||
+    typeof value === "symbol"
+  ) {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value) ?? "";
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function stripFinalTagsFromText(text: unknown): string {
+  const normalized = coerceText(text);
+  if (!normalized) {
+    return normalized;
+  }
+  return normalized.replace(FINAL_TAG_RE, "");
 }
 
 function collapseConsecutiveDuplicateBlocks(text: string): string {
@@ -667,7 +868,7 @@ function isLikelyHttpErrorText(raw: string): boolean {
   if (status.code < 400) {
     return false;
   }
-  const message = status.rest.toLowerCase();
+  const message = normalizeLowercaseStringOrEmpty(status.rest);
   return HTTP_ERROR_HINTS.some((hint) => message.includes(hint));
 }
 
@@ -699,7 +900,7 @@ export function isRawApiErrorPayload(raw?: string): boolean {
 }
 
 function isLikelyProviderErrorType(type?: string): boolean {
-  const normalized = type?.trim().toLowerCase();
+  const normalized = normalizeOptionalLowercaseString(type);
   if (!normalized) {
     return false;
   }
@@ -771,15 +972,15 @@ export function formatAssistantErrorText(
     );
   }
 
-  if (isInvalidStreamingEventOrderError(raw)) {
-    return "LLM request failed: provider returned an invalid streaming response. Please try again.";
-  }
-
   if (isReasoningConstraintErrorMessage(raw)) {
     return (
       "Reasoning is required for this model endpoint. " +
       "Use /think minimal (or any non-off level) and try again."
     );
+  }
+
+  if (isInvalidStreamingEventOrderError(raw)) {
+    return "LLM request failed: provider returned an invalid streaming response. Please try again.";
   }
 
   // Catch role ordering errors - including JSON-wrapped and "400" prefix variants
@@ -951,13 +1152,13 @@ export function isBillingAssistantError(msg: AssistantMessage | undefined): bool
 // Non-transient api_error payloads (context overflow, validation/schema errors)
 // must NOT be classified as timeout.
 const API_ERROR_TRANSIENT_SIGNALS_RE =
-  /internal server error|overload|temporarily unavailable|service unavailable|unknown error|server error|bad gateway|gateway timeout|upstream error|backend error|try again later|temporarily.+unable/i;
+  /internal server error|overload|temporarily unavailable|service unavailable|unknown error|server error|bad gateway|gateway timeout|upstream error|backend error|try again later|temporarily.+unable|unexpected error/i;
 
 function isJsonApiInternalServerError(raw: string): boolean {
   if (!raw) {
     return false;
   }
-  const value = raw.toLowerCase();
+  const value = normalizeLowercaseStringOrEmpty(raw);
   // Providers wrap transient 5xx errors in JSON payloads like:
   // {"type":"error","error":{"type":"api_error","message":"Internal server error"}}
   // Non-standard providers (e.g. MiniMax) may use different message text:
@@ -985,7 +1186,7 @@ export function parseImageDimensionError(raw: string): {
   if (!raw) {
     return null;
   }
-  const lower = raw.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(raw);
   if (!lower.includes("image dimensions exceed max allowed size")) {
     return null;
   }
@@ -1010,7 +1211,7 @@ export function parseImageSizeError(raw: string): {
   if (!raw) {
     return null;
   }
-  const lower = raw.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(raw);
   if (!lower.includes("image exceeds") || !lower.includes("mb")) {
     return null;
   }
@@ -1043,7 +1244,7 @@ export function isModelNotFoundErrorMessage(raw: string): boolean {
   if (!raw) {
     return false;
   }
-  const lower = raw.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(raw);
 
   // Direct pattern matches from OpenClaw internals and common providers.
   if (
@@ -1074,7 +1275,7 @@ function isCliSessionExpiredErrorMessage(raw: string): boolean {
   if (!raw) {
     return false;
   }
-  const lower = raw.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(raw);
   return (
     lower.includes("session not found") ||
     lower.includes("session does not exist") ||
@@ -1091,172 +1292,19 @@ function isCliSessionExpiredErrorMessage(raw: string): boolean {
   );
 }
 
-export type FailoverSignal = {
-  status?: number;
-  code?: string;
-  message?: string;
-  provider?: string;
-};
-
-export type FailoverClassification =
-  | { kind: "reason"; reason: FailoverReason }
-  | { kind: "context_overflow" };
-
-function classifyFailoverReasonFromCode(raw: string | undefined): FailoverReason | null {
-  const normalized = raw?.trim().toUpperCase();
-  if (!normalized) {
-    return null;
-  }
-  switch (normalized) {
-    case "RESOURCE_EXHAUSTED":
-    case "RATE_LIMIT":
-    case "RATE_LIMITED":
-    case "RATE_LIMIT_EXCEEDED":
-    case "TOO_MANY_REQUESTS":
-    case "THROTTLED":
-    case "THROTTLING":
-    case "THROTTLINGEXCEPTION":
-    case "THROTTLING_EXCEPTION":
-      return "rate_limit";
-    case "OVERLOADED":
-    case "OVERLOADED_ERROR":
-      return "overloaded";
-    default:
-      return TIMEOUT_ERROR_CODES.has(normalized) ? "timeout" : null;
-  }
-}
-
-function isProvider(provider: string | undefined, match: string): boolean {
-  const normalized = normalizeOptionalLowercaseString(provider);
-  return Boolean(normalized && normalized.includes(match));
-}
-
-function isAnthropicGenericUnknownError(raw: string, provider?: string): boolean {
-  return (
-    isProvider(provider, "anthropic") &&
-    (normalizeOptionalLowercaseString(raw)?.includes("an unknown error occurred") ?? false)
-  );
-}
-
-function isOpenRouterProviderReturnedError(raw: string, provider?: string): boolean {
-  return (
-    isProvider(provider, "openrouter") &&
-    (normalizeOptionalLowercaseString(raw)?.includes("provider returned error") ?? false)
-  );
-}
-
-function isOpenRouterKeyLimitExceededError(raw: string, provider?: string): boolean {
-  return (
-    isProvider(provider, "openrouter") && /\bkey\s+limit\s*(?:exceeded|reached|hit)\b/i.test(raw)
-  );
-}
-
-function classifyFailoverClassificationFromMessage(
-  raw: string,
-  provider?: string,
-): FailoverClassification | null {
-  if (isImageDimensionErrorMessage(raw)) {
-    return null;
-  }
-  if (isImageSizeError(raw)) {
-    return null;
-  }
-  if (isCliSessionExpiredErrorMessage(raw)) {
-    return toReasonClassification("session_expired");
-  }
-  if (isModelNotFoundErrorMessage(raw)) {
-    return toReasonClassification("model_not_found");
-  }
-  if (isContextOverflowError(raw)) {
-    return { kind: "context_overflow" };
-  }
-  const reasonFrom402Text = classifyFailoverReasonFrom402Text(raw);
-  if (reasonFrom402Text) {
-    return toReasonClassification(reasonFrom402Text);
-  }
-  if (isOpenRouterKeyLimitExceededError(raw, provider)) {
-    return toReasonClassification("billing");
-  }
-  if (isPeriodicUsageLimitErrorMessage(raw)) {
-    return toReasonClassification(isBillingErrorMessage(raw) ? "billing" : "rate_limit");
-  }
-  if (isRateLimitErrorMessage(raw)) {
-    return toReasonClassification("rate_limit");
-  }
-  if (isOverloadedErrorMessage(raw)) {
-    return toReasonClassification("overloaded");
-  }
-  if (isTransientHttpError(raw)) {
-    const status = extractLeadingHttpStatus(raw.trim());
-    if (status?.code === 529) {
-      return toReasonClassification("overloaded");
-    }
-    return toReasonClassification("timeout");
-  }
-  if (isBillingErrorMessage(raw)) {
-    return toReasonClassification("billing");
-  }
-  if (isAuthPermanentErrorMessage(raw)) {
-    return toReasonClassification("auth_permanent");
-  }
-  if (isAuthErrorMessage(raw)) {
-    return toReasonClassification("auth");
-  }
-  if (isAnthropicGenericUnknownError(raw, provider)) {
-    return toReasonClassification("timeout");
-  }
-  if (isOpenRouterProviderReturnedError(raw, provider)) {
-    return toReasonClassification("timeout");
-  }
-  if (isServerErrorMessage(raw)) {
-    return toReasonClassification("timeout");
-  }
-  if (isJsonApiInternalServerError(raw)) {
-    return toReasonClassification("timeout");
-  }
-  if (isCloudCodeAssistFormatError(raw)) {
-    return toReasonClassification("format");
-  }
-  if (isTimeoutErrorMessage(raw)) {
-    return toReasonClassification("timeout");
-  }
-  const providerSpecific = classifyProviderSpecificError(raw);
-  if (providerSpecific) {
-    return toReasonClassification(providerSpecific);
-  }
-  return null;
-}
-
 export function classifyFailoverReason(
   raw: string,
   opts?: { provider?: string },
 ): FailoverReason | null {
+  const trimmed = raw.trim();
+  const leadingStatus = extractLeadingHttpStatus(trimmed);
   return failoverReasonFromClassification(
-    classifyFailoverClassificationFromMessage(raw, opts?.provider),
+    classifyFailoverSignal({
+      status: leadingStatus?.code,
+      message: raw,
+      provider: opts?.provider,
+    }),
   );
-}
-
-export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassification | null {
-  const inferredStatus =
-    typeof signal.status === "number" && Number.isFinite(signal.status)
-      ? signal.status
-      : extractLeadingHttpStatus(signal.message?.trim() ?? "")?.code;
-  const messageClassification = signal.message
-    ? classifyFailoverClassificationFromMessage(signal.message, signal.provider)
-    : null;
-  const statusClassification = classifyFailoverClassificationFromHttpStatus(
-    inferredStatus,
-    signal.message,
-    messageClassification,
-  );
-  if (statusClassification) {
-    return statusClassification;
-  }
-  const codeReason = classifyFailoverReasonFromCode(signal.code);
-  if (codeReason) {
-    return toReasonClassification(codeReason);
-  }
-  return messageClassification;
 }
 
 export function isFailoverErrorMessage(raw: string, opts?: { provider?: string }): boolean {
@@ -1267,30 +1315,5 @@ export function isFailoverAssistantError(msg: AssistantMessage | undefined): boo
   if (!msg || msg.stopReason !== "error") {
     return false;
   }
-  return isFailoverErrorMessage(msg.errorMessage ?? "");
-}
-
-function coerceText(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value == null) {
-    return "";
-  }
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint" ||
-    typeof value === "symbol"
-  ) {
-    return String(value);
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value) ?? "";
-    } catch {
-      return "";
-    }
-  }
-  return "";
+  return isFailoverErrorMessage(msg.errorMessage ?? "", { provider: msg.provider });
 }

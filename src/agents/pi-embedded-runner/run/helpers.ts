@@ -1,5 +1,4 @@
 import type { OpenClawConfig } from "../../../config/config.js";
-import type { BackoffPolicy } from "../../../infra/backoff.js";
 import { generateSecureToken } from "../../../infra/secure-random.js";
 import { derivePromptTokens, normalizeUsage } from "../../usage.js";
 import type { EmbeddedPiAgentMeta } from "../types.js";
@@ -27,12 +26,6 @@ export const RUNTIME_AUTH_REFRESH_RETRY_MS = 60 * 1000;
 export const RUNTIME_AUTH_REFRESH_MIN_DELAY_MS = 5 * 1000;
 
 export const DEFAULT_OVERLOAD_FAILOVER_BACKOFF_MS = 0;
-export const OVERLOAD_FAILOVER_BACKOFF_POLICY: BackoffPolicy = {
-  initialMs: DEFAULT_OVERLOAD_FAILOVER_BACKOFF_MS,
-  maxMs: DEFAULT_OVERLOAD_FAILOVER_BACKOFF_MS,
-  factor: 1,
-  jitter: 0,
-};
 export const DEFAULT_MAX_OVERLOAD_PROFILE_ROTATIONS = 1;
 export const DEFAULT_MAX_RATE_LIMIT_PROFILE_ROTATIONS = 1;
 

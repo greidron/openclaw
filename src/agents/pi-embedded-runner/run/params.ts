@@ -20,6 +20,7 @@ export type ClientToolDefinition = {
     name: string;
     description?: string;
     parameters?: Record<string, unknown>;
+    /** Strict argument enforcement (Responses API). Propagated from the request. */
     strict?: boolean;
   };
 };
@@ -139,13 +140,6 @@ export type RunEmbeddedPiAgentParams = {
    * where transient service pressure is often model-scoped.
    */
   allowTransientCooldownProbe?: boolean;
-  /**
-   * When true, do not treat the persisted session model override as a live
-   * switch target for this run. This is used by automatic fallback retries,
-   * where the session's selected model should remain the requested model
-   * without aborting each candidate attempt back to that persisted selection.
-   */
-  suppressPersistedLiveModelSelection?: boolean;
   /**
    * Dispose bundled MCP runtimes when the overall run ends instead of preserving
    * the session-scoped cache. Intended for one-shot local CLI runs that must
