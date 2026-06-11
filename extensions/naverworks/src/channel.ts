@@ -1,4 +1,9 @@
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
+import type {
+  ChannelAccountSnapshot,
+  ChannelGatewayContext,
+  ChannelLogSink,
+} from "openclaw/plugin-sdk/channel-contract";
 import { toLocationContext } from "openclaw/plugin-sdk/channel-inbound";
 import {
   buildChannelConfigSchema,
@@ -116,11 +121,7 @@ async function sendStatusSticker(params: {
   account: ReturnType<typeof resolveAccount>;
   userId: string;
   phase: "received" | "processing" | "failed";
-  log?: {
-    info?: (...args: unknown[]) => void;
-    warn?: (...args: unknown[]) => void;
-    error?: (...args: unknown[]) => void;
-  };
+  log?: ChannelLogSink;
 }): Promise<void> {
   if (!params.account.statusStickers?.enabled) {
     params.log?.info?.(
@@ -165,11 +166,7 @@ async function sendStatusSticker(params: {
 function startProcessingStickerHeartbeat(params: {
   account: ReturnType<typeof resolveAccount>;
   userId: string;
-  log?: {
-    info?: (...args: unknown[]) => void;
-    warn?: (...args: unknown[]) => void;
-    error?: (...args: unknown[]) => void;
-  };
+  log?: ChannelLogSink;
 }): () => void {
   params.log?.info?.(
     `naverworks[${params.account.accountId}]: starting processing sticker heartbeat for ${params.userId} intervalMs=${PROCESSING_STICKER_INTERVAL_MS}`,
@@ -211,11 +208,7 @@ async function downloadInboundMedia(params: {
   runtime: ReturnType<typeof getNaverWorksRuntime>;
   account: ReturnType<typeof resolveAccount>;
   event: { mediaUrl?: string; mediaMimeType?: string; mediaFileName?: string; mediaKind?: string };
-  log?: {
-    info?: (...args: unknown[]) => void;
-    warn?: (...args: unknown[]) => void;
-    error?: (...args: unknown[]) => void;
-  };
+  log?: ChannelLogSink;
 }): Promise<{ path?: string; mediaType?: string }> {
   const mediaUrl = params.event.mediaUrl?.trim();
   if (!mediaUrl) {
@@ -234,21 +227,17 @@ async function downloadInboundMedia(params: {
   }
 
   try {
-    const fetched = await params.runtime.channel.media.fetchRemoteMedia({
+    const saved = await params.runtime.channel.media.saveRemoteMedia({
       url: mediaUrl,
       maxBytes,
       requestInit: Object.keys(headers).length > 0 ? { headers } : undefined,
+      fallbackContentType: params.event.mediaMimeType,
+      subdir: "inbound",
+      originalFilename: params.event.mediaFileName ?? params.event.mediaKind,
     });
-    const saved = await params.runtime.channel.media.saveMediaBuffer(
-      fetched.buffer,
-      fetched.contentType ?? params.event.mediaMimeType,
-      "inbound",
-      maxBytes,
-      fetched.fileName ?? params.event.mediaFileName ?? params.event.mediaKind,
-    );
     return {
       path: saved.path,
-      mediaType: saved.contentType ?? fetched.contentType ?? params.event.mediaMimeType,
+      mediaType: saved.contentType ?? params.event.mediaMimeType,
     };
   } catch (error) {
     params.log?.error?.(
@@ -289,8 +278,9 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
     configSchema: NaverWorksConfigSchema,
 
     config: {
-      listAccountIds: (cfg: any) => listAccountIds(cfg),
-      resolveAccount: (cfg: any, accountId?: string | null) => resolveAccount(cfg, accountId),
+      listAccountIds: (cfg: Record<string, unknown>) => listAccountIds(cfg),
+      resolveAccount: (cfg: Record<string, unknown>, accountId?: string | null) =>
+        resolveAccount(cfg, accountId),
       defaultAccountId: () => DEFAULT_ACCOUNT_ID,
       isConfigured: (account: ReturnType<typeof resolveAccount>) => isNaverWorksConfigured(account),
       describeAccount: (account: ReturnType<typeof resolveAccount>) => ({
@@ -299,11 +289,19 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
         configured: isNaverWorksConfigured(account),
         dmPolicy: account.dmPolicy,
       }),
-      setAccountEnabled: ({ cfg, accountId, enabled }: any) =>
+      setAccountEnabled: ({
+        cfg,
+        accountId,
+        enabled,
+      }: {
+        cfg: Record<string, unknown>;
+        accountId?: string | null;
+        enabled: boolean;
+      }) =>
         setAccountEnabledInConfigSection({
           cfg,
           sectionKey: "channels.naverworks",
-          accountId,
+          accountId: accountId ?? DEFAULT_ACCOUNT_ID,
           enabled,
         }),
     },
@@ -335,7 +333,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
         if (!sent.ok) {
           if (sent.reason === "not-configured") {
             throw new Error(
-              `NAVER WORKS account \"${account.accountId}\" is not configured for outbound delivery (set botId and auth settings).`,
+              `NAVER WORKS account "${account.accountId}" is not configured for outbound delivery (set botId and auth settings).`,
             );
           }
           throw new Error(
@@ -383,7 +381,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
         if (!sentMedia.ok) {
           if (sentMedia.reason === "not-configured") {
             throw new Error(
-              `NAVER WORKS account \"${account.accountId}\" is not configured for media outbound delivery (set botId and auth settings).`,
+              `NAVER WORKS account "${account.accountId}" is not configured for media outbound delivery (set botId and auth settings).`,
             );
           }
           throw new Error(
@@ -411,7 +409,13 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
         lastOutboundAt: null,
         lastError: null,
       },
-      buildAccountSnapshot: ({ account, runtime }: any) => {
+      buildAccountSnapshot: ({
+        account,
+        runtime,
+      }: {
+        account: ReturnType<typeof resolveAccount>;
+        runtime?: ChannelAccountSnapshot;
+      }) => {
         const configured = isNaverWorksConfigured(account);
         return {
           accountId: account.accountId,
@@ -430,7 +434,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
     },
 
     gateway: {
-      startAccount: async (ctx: any) => {
+      startAccount: async (ctx: ChannelGatewayContext<NaverWorksAccount>) => {
         const { cfg, accountId, log } = ctx;
         log?.info?.(`naverworks[${accountId ?? DEFAULT_ACCOUNT_ID}]: start requested`);
         const account = resolveAccount(cfg, accountId);
@@ -549,7 +553,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
               MediaUrl: event.mediaUrl ?? mediaPath,
               MediaUrls: mediaUrls,
               MediaName: event.mediaFileName,
-              ...(locationContext ?? {}),
+              ...locationContext,
             };
 
             log?.info?.(
@@ -582,11 +586,15 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                     audioAsVoice?: boolean;
                   }) => {
                     const text = payload?.text ?? payload?.body;
-                    const mediaUrls = resolveOutboundMediaUrls(payload ?? {});
-                    const remoteMediaUrls = mediaUrls.filter((url) => /^https?:\/\//i.test(url));
-                    const localMediaPaths = mediaUrls.filter((url) => !/^https?:\/\//i.test(url));
+                    const outboundMediaUrls = resolveOutboundMediaUrls(payload ?? {});
+                    const remoteMediaUrls = outboundMediaUrls.filter((url) =>
+                      /^https?:\/\//i.test(url),
+                    );
+                    const localMediaPaths = outboundMediaUrls.filter(
+                      (url) => !/^https?:\/\//i.test(url),
+                    );
                     const pendingRemoteMedia = [...remoteMediaUrls];
-                    let pendingText = text;
+                    const pendingText = text;
                     log?.info?.(
                       `naverworks[${account.accountId}]: deliver callback text=${text ? "yes" : "no"} remoteMedia=${remoteMediaUrls.length} localMedia=${localMediaPaths.length}`,
                     );
@@ -666,14 +674,14 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                       );
                     }
 
-                    for (const mediaPath of localMediaPaths) {
+                    for (const localMediaPath of localMediaPaths) {
                       log?.info?.(
-                        `naverworks[${account.accountId}]: sending local media through attachment upload to ${event.userId} mediaPath=${mediaPath}`,
+                        `naverworks[${account.accountId}]: sending local media through attachment upload to ${event.userId} mediaPath=${localMediaPath}`,
                       );
                       const sentMedia = await sendMessageNaverWorks({
                         account,
                         toUserId: event.userId,
-                        mediaUrl: mediaPath,
+                        mediaUrl: localMediaPath,
                       });
                       if (!sentMedia.ok) {
                         if (sentMedia.reason === "not-configured") {
@@ -743,7 +751,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
           `naverworks[${account.accountId}]: webhook route registered at ${account.webhookPath}`,
         );
         activeRouteUnregisters.set(routeKey, unregister);
-        ctx.setStatus({ connected: true, lastError: null });
+        ctx.setStatus({ ...ctx.getStatus(), connected: true, lastError: null });
 
         try {
           // Webhook mode is passive; keep account task alive until the runtime aborts it.
@@ -758,10 +766,11 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
           log?.info?.(
             `naverworks[${account.accountId}]: abort received; unregistering webhook route`,
           );
-          ctx.setStatus({ connected: false });
+          ctx.setStatus({ ...ctx.getStatus(), connected: false });
           unregister();
           activeRouteUnregisters.delete(routeKey);
         }
+        return { stop: () => {} };
       },
       stopAccount: async () => {},
     },

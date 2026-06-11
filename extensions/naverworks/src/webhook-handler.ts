@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ChannelLogSink } from "openclaw/plugin-sdk/channel-contract";
 import { formatLocationText } from "openclaw/plugin-sdk/channel-inbound";
 import type { NaverWorksAccount, NaverWorksInboundEvent } from "./types.js";
 
@@ -257,7 +258,9 @@ function synthesizeNaverWorksText(params: {
 function pickFirstString(candidates: unknown[]): string | undefined {
   for (const candidate of candidates) {
     const value = asString(candidate);
-    if (value) return value;
+    if (value) {
+      return value;
+    }
   }
   return undefined;
 }
@@ -457,11 +460,7 @@ function respondJson(res: ServerResponse, statusCode: number, payload: Record<st
 export type NaverWorksWebhookDeps = {
   account: NaverWorksAccount;
   deliver: (event: NaverWorksInboundEvent) => Promise<void>;
-  log?: {
-    info?: (...args: unknown[]) => void;
-    warn?: (...args: unknown[]) => void;
-    error?: (...args: unknown[]) => void;
-  };
+  log?: ChannelLogSink;
 };
 
 export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
@@ -475,11 +474,11 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
       return;
     }
 
-    let rawBody = "";
+    let rawBody: string;
     try {
       rawBody = await readBody(req);
     } catch (error) {
-      log?.error?.("naverworks: failed reading request body", error);
+      log?.error?.(`naverworks: failed reading request body: ${String(error)}`);
       respondJson(res, 400, { error: "Invalid body" });
       return;
     }

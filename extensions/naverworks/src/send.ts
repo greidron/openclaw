@@ -2,10 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createTextLineComponents,
   markdownToNaverWorksFlexTemplate,
   type NaverWorksFlexContainer,
-  type NaverWorksFlexComponent,
 } from "./markdown-to-flex.js";
 import { getNaverWorksRuntime } from "./runtime.js";
 import type { NaverWorksAccount, NaverWorksStickerRef } from "./types.js";
@@ -79,7 +77,7 @@ function buildSendUrl(account: NaverWorksAccount, userId: string): string {
 
 function base64UrlEncode(value: string | Buffer): string {
   const source = typeof value === "string" ? Buffer.from(value, "utf-8") : value;
-  return source.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return source.toString("base64").replace(/[=]/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 function buildJwtAssertion(params: {
@@ -109,14 +107,6 @@ function buildJwtAssertion(params: {
 
 function isRemoteHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
-}
-
-function buildAltText(text: string): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return "OpenClaw message";
-  }
-  return normalized.slice(0, 400);
 }
 
 function normalizeMimeType(mime?: string | null): string | undefined {
@@ -263,56 +253,14 @@ function buildAttachmentCreateUrl(account: NaverWorksAccount): string {
 }
 
 function inferMediaKindFromUrl(mediaUrl: string): "image" | "audio" | "file" {
-  const path = mediaUrl.split("?")[0]?.toLowerCase() ?? "";
-  if (path.match(/\.(png|jpe?g|gif|webp|bmp|heic|svg)$/)) {
+  const mediaPathname = mediaUrl.split("?")[0]?.toLowerCase() ?? "";
+  if (/\.(png|jpe?g|gif|webp|bmp|heic|svg)$/.test(mediaPathname)) {
     return "image";
   }
-  if (path.match(/\.(mp3|m4a|wav|ogg|opus|aac|flac|amr)$/)) {
+  if (/\.(mp3|m4a|wav|ogg|opus|aac|flac|amr)$/.test(mediaPathname)) {
     return "audio";
   }
   return "file";
-}
-
-function createImageComponent(url: string, options?: { margin?: "none" | "sm" | "md" }) {
-  return {
-    type: "image" as const,
-    url,
-    size: "full" as const,
-    aspectRatio: "4:3",
-    aspectMode: "fit" as const,
-    margin: options?.margin,
-  };
-}
-
-function createTextComponents(text: string, theme: NaverWorksAccount["markdownTheme"]) {
-  const resolvedTheme = theme ?? "auto";
-  const sectionTitleColor = resolvedTheme === "dark" ? "#ffffff" : "#000000";
-  const textColor = resolvedTheme === "dark" ? "#f5f5f5" : "#111111";
-  const lines = text
-    .trim()
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length === 0) {
-    const fallbackText = text.trim() || "OpenClaw message";
-    return createTextLineComponents(fallbackText, { color: textColor, size: "md" });
-  }
-
-  const [first, ...rest] = lines;
-  const components: NaverWorksFlexComponent[] = [
-    ...createTextLineComponents(first, {
-      bold: true,
-      color: sectionTitleColor,
-      size: "md",
-    }),
-  ];
-  for (const line of rest) {
-    components.push(
-      ...createTextLineComponents(line, { margin: "sm", color: textColor, size: "md" }),
-    );
-  }
-  return components;
 }
 
 function toLocalFilePath(mediaUrl: string): string | null {
@@ -381,7 +329,7 @@ async function uploadAttachmentBinary(params: {
   form.set("resourceName", params.fileName);
   form.set(
     "FileData",
-    new Blob([params.fileBuffer], { type: params.contentType }),
+    new Blob([Uint8Array.from(params.fileBuffer)], { type: params.contentType }),
     params.fileName,
   );
   const response = await fetch(params.uploadUrl, {

@@ -148,7 +148,7 @@ export const mockedHasDifferentLiveSessionModelSelection = vi.fn(
   (
     current: { provider: string; model: string },
     next: { provider: string; model: string } | null,
-  ) => Boolean(next) && (current.provider !== next.provider || current.model !== next.model),
+  ) => next !== null && (current.provider !== next.provider || current.model !== next.model),
 );
 export const mockedRunContextEngineMaintenance = vi.fn(async () => undefined);
 export const mockedSessionLikelyHasOversizedToolResults = vi.fn(() => false);
@@ -361,7 +361,7 @@ export function resetRunOverflowCompactionHarnessMocks(): void {
     (
       current: { provider: string; model: string },
       next: { provider: string; model: string } | null,
-    ) => Boolean(next) && (current.provider !== next.provider || current.model !== next.model),
+    ) => next !== null && (current.provider !== next.provider || current.model !== next.model),
   );
   mockedRunContextEngineMaintenance.mockReset();
   mockedRunContextEngineMaintenance.mockResolvedValue(undefined);

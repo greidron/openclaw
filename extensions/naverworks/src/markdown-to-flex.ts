@@ -212,7 +212,7 @@ export function createTextComponent(
     type: "text" as const,
     text,
     wrap: true,
-    size: (options?.size ?? "md") as const,
+    size: options?.size ?? "md",
     color: options?.color,
     weight: options?.bold ? ("bold" as const) : undefined,
     margin: options?.margin,
@@ -238,14 +238,20 @@ export function createTextLineComponents(
       type: "box" as const,
       layout: "baseline" as const,
       margin: options?.margin,
-      contents: segments.map((segment) => ({
-        ...createTextComponent(segment.text, {
-          bold: options?.bold,
-          color: options?.color,
-          size: options?.size,
-        }),
-        action: segment.uri ? { type: "uri" as const, uri: segment.uri } : undefined,
-      })),
+      contents: segments.map((segment) => {
+        const component: Extract<NaverWorksFlexComponent, { type: "text" }> = createTextComponent(
+          segment.text,
+          {
+            bold: options?.bold,
+            color: options?.color,
+            size: options?.size,
+          },
+        );
+        if (segment.uri) {
+          component.action = { type: "uri", uri: segment.uri };
+        }
+        return component;
+      }),
     },
   ];
 }
