@@ -117,7 +117,9 @@ describe("chutes implicit provider auth mode", () => {
       const chutesCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("chutes.ai"));
       expect(chutesCalls.length).toBeGreaterThan(0);
       const request = chutesCalls[0]?.[1] as { headers?: HeadersInit } | undefined;
-      expect(readAuthorizationHeader(request)).toBe("Bearer my-chutes-access-token");
+      expect(new Headers(request?.headers).get("authorization")).toBe(
+        "Bearer my-chutes-access-token",
+      );
     });
   });
 });

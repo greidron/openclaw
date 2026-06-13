@@ -7,6 +7,11 @@ import { testing as cliBackendsTesting } from "../../agents/cli-backends.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { getSessionEntry } from "../../config/sessions.js";
 import {
+  readSessionStoreForTest,
+  writeSessionStoreForTestAsync,
+} from "../../config/sessions/test-helpers.js";
+import { getReplyPayloadMetadata } from "../reply-payload.js";
+import {
   buildFastReplyCommandContext,
   initFastReplySessionState,
   markCompleteReplyConfig,
@@ -481,6 +486,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
       throw new Error("expected single reply payload");
     }
     expect(reply.text).toContain("Think: xhigh");
+    expect(getReplyPayloadMetadata(reply)?.deliverDespiteSourceReplySuppression).toBe(true);
     expect(mocks.loadModelCatalog).not.toHaveBeenCalled();
     expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
     expect(mocks.initSessionState).not.toHaveBeenCalled();
@@ -505,22 +511,26 @@ describe("getReplyFromConfig fast test bootstrap", () => {
       reply: { text: "model status" },
     });
 
-    await expect(
-      getReplyFromConfig(
-        buildGetReplyCtx({
-          Body: "/model status",
-          BodyForAgent: "/model status",
-          RawBody: "/model status",
-          CommandBody: "/model status",
-          CommandSource: "native",
-          CommandAuthorized: true,
-          SessionKey: "telegram:slash:123",
-          CommandTargetSessionKey: targetSessionKey,
-        }),
-        undefined,
-        cfg,
-      ),
-    ).resolves.toEqual({ text: "model status" });
+    const reply = await getReplyFromConfig(
+      buildGetReplyCtx({
+        Body: "/model status",
+        BodyForAgent: "/model status",
+        RawBody: "/model status",
+        CommandBody: "/model status",
+        CommandSource: "native",
+        CommandAuthorized: true,
+        SessionKey: "telegram:slash:123",
+        CommandTargetSessionKey: targetSessionKey,
+      }),
+      undefined,
+      cfg,
+    );
+
+    expect(reply).toMatchObject({ text: "model status" });
+    if (!reply || Array.isArray(reply)) {
+      throw new Error("expected single reply payload");
+    }
+    expect(getReplyPayloadMetadata(reply)?.deliverDespiteSourceReplySuppression).toBe(true);
 
     expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
     expect(mocks.initSessionState).not.toHaveBeenCalled();
