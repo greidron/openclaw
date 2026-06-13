@@ -400,6 +400,14 @@ const ToolsWebSearchSchema = z
           })
           .strict()
           .optional(),
+        playwrightMcp: z
+          .object({
+            serverUrl: z.string().optional(),
+            defaultEngine: z.enum(["google", "duckduckgo", "bing", "naver"]).optional(),
+            includeNaverForProductSearch: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .catchall(z.unknown())
       .superRefine((value, ctx) => {
@@ -463,14 +471,6 @@ const ToolsWebFetchSchema = z
         onlyMainContent: z.boolean().optional(),
         maxAgeMs: z.number().int().nonnegative().optional(),
         timeoutSeconds: z.number().int().positive().optional(),
-      })
-      .strict()
-      .optional(),
-    playwrightMcp: z
-      .object({
-        serverUrl: z.string().optional(),
-        defaultEngine: z.enum(["google", "duckduckgo", "bing", "naver"]).optional(),
-        includeNaverForProductSearch: z.boolean().optional(),
       })
       .strict()
       .optional(),
