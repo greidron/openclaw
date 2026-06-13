@@ -6,7 +6,8 @@
     "onConfigPaths": ["browser"]
   },
   "contracts": {
-    "tools": ["browser"]
+    "tools": ["browser"],
+    "webSearchProviders": ["playwright-mcp"]
   },
   "commandAliases": [{ "name": "browser" }],
   "skills": ["./skills"],
