@@ -381,7 +381,7 @@ API-backed providers first:
 
 Key-free fallbacks after that:
 
-11. **Playwright MCP** -- browser-backed search through `PLAYWRIGHT_MCP_SERVER_URL` or `tools.web.search.playwrightMcp.serverUrl`; uses Google by default and can add Naver for product-style queries (order 50)
+11. **Playwright MCP** -- browser-backed search through `PLAYWRIGHT_MCP_SERVER_URL` or `tools.web.search.playwrightMcp.serverUrl`; uses Google by default, supports `mode: "auto" | "browser" | "tool"`, and can add Naver for product-style queries (order 50)
 12. **Parallel Search (Free)** -- the zero-config default: works with no account or API key via Parallel's free hosted [Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) (order 76)
 13. **DuckDuckGo** -- key-free HTML fallback with no account or API key (order 100)
 14. **Ollama Web Search** -- key-free fallback via your configured local Ollama host when it is reachable and signed in with `ollama signin`; can reuse Ollama provider bearer auth when the host needs it, and can call direct `https://ollama.com` search when configured with `OLLAMA_API_KEY` (order 110)

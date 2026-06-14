@@ -31,6 +31,12 @@ export function createPlaywrightMcpWebSearchProvider(): WebSearchProviderPlugin 
               type: "string",
               description: "Search query.",
             },
+            search_queries: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Optional list of search queries. The first entry is used when query is omitted.",
+            },
             count: {
               type: "number",
               description: "Maximum number of results to return.",
@@ -55,8 +61,28 @@ export function createPlaywrightMcpWebSearchProvider(): WebSearchProviderPlugin 
               type: "string",
               description: "Optional upper date bound.",
             },
+            mode: {
+              type: "string",
+              enum: ["auto", "browser", "tool"],
+              description:
+                "Execution mode: auto prefers browser extraction with tool fallback, browser requires browser tools, tool requires the MCP web_search tool.",
+            },
+            domain_filter: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional domain filters. Prefix a domain with '-' to exclude it.",
+            },
+            include_domains: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional domains to include using search engine site: filters.",
+            },
+            exclude_domains: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional domains to exclude using search engine -site: filters.",
+            },
           },
-          required: ["query"],
         },
         async execute(args, runCtx) {
           const mod = await import("./src/playwright-mcp-web-search-provider.runtime.js");

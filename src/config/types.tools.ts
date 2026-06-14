@@ -637,6 +637,17 @@ export type ToolsConfig = {
           timezone?: string;
         };
       };
+      /** Optional Playwright MCP web_search provider settings. */
+      playwrightMcp?: {
+        /** Streamable HTTP MCP endpoint for the Playwright MCP server. */
+        serverUrl?: string;
+        /** Default browser search engine. */
+        defaultEngine?: "google" | "duckduckgo" | "bing" | "naver";
+        /** Execution policy: auto prefers browser extraction with tool fallback. */
+        mode?: "auto" | "browser" | "tool";
+        /** Add a Naver search URL for product-style queries. */
+        includeNaverForProductSearch?: boolean;
+      };
     } & Record<string, unknown>;
     /** X (formerly Twitter) search tool configuration using xAI Grok. */
     x_search?: {
