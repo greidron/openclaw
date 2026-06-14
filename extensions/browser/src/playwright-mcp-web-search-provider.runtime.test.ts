@@ -67,6 +67,24 @@ describe("playwright MCP web search provider runtime", () => {
     ).toEqual({ results: [{ title: "A" }] });
   });
 
+  it("normalizes MCP markdown-wrapped browser evaluate responses", () => {
+    expect(
+      internals.normalizeMcpToolResponse({
+        content: [
+          {
+            type: "text",
+            text: [
+              "### Result",
+              JSON.stringify([{ title: "OpenClaw", url: "https://docs.openclaw.ai/tools/web" }]),
+              "### Ran Playwright code",
+              "await page.evaluate(...)",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ).toEqual({ results: [{ title: "OpenClaw", url: "https://docs.openclaw.ai/tools/web" }] });
+  });
+
   it("extracts structured results from browser evaluate payloads", () => {
     expect(
       internals.normalizeExtractedBrowserResults(
@@ -87,9 +105,82 @@ describe("playwright MCP web search provider runtime", () => {
         title: "OpenClaw docs",
         url: "https://docs.openclaw.ai/tools/web",
         snippet: "Web search provider docs",
+        resultType: "web",
         sourceUrl: "https://www.google.com/search?q=openclaw",
       },
     ]);
+  });
+
+  it("adds Naver general search URL for product-like natural language queries", () => {
+    const request = internals.readPlaywrightMcpSearchRequest(
+      {
+        query: "맥북 에어 m4 최저가 어디서 사는게 좋아?",
+      },
+      {},
+    );
+
+    expect(
+      internals.resolvePlaywrightMcpSearchUrls({
+        request,
+        defaultEngine: "google",
+        includeNaverForProductSearch: true,
+      }),
+    ).toContain(
+      "https://search.naver.com/search.naver?query=%EB%A7%A5%EB%B6%81+%EC%97%90%EC%96%B4+m4+%EC%B5%9C%EC%A0%80%EA%B0%80+%EC%96%B4%EB%94%94%EC%84%9C+%EC%82%AC%EB%8A%94%EA%B2%8C+%EC%A2%8B%EC%95%84%3F",
+    );
+  });
+
+  it("normalizes shopping-like Naver search evaluate fields", () => {
+    expect(
+      internals.normalizeExtractedBrowserResults(
+        {
+          results: [
+            {
+              title: "MacBook Air M4",
+              url: "https://shopping.naver.com/catalog/123",
+              snippet: "MacBook Air M4 13 inch",
+              price: "1,390,000원",
+              mallName: "Apple 공식스토어",
+              image: "https://img.example/macbook.jpg",
+              rating: "4.8",
+              reviewCount: "1,234",
+              delivery: "무료배송",
+              category: "노트북",
+              resultType: "shopping",
+            },
+          ],
+        },
+        "https://search.naver.com/search.naver?query=macbook",
+      ),
+    ).toEqual([
+      {
+        title: "MacBook Air M4",
+        url: "https://shopping.naver.com/catalog/123",
+        snippet: "MacBook Air M4 13 inch",
+        price: "1,390,000원",
+        mallName: "Apple 공식스토어",
+        image: "https://img.example/macbook.jpg",
+        rating: "4.8",
+        reviewCount: "1,234",
+        delivery: "무료배송",
+        category: "노트북",
+        resultType: "shopping",
+        sourceUrl: "https://search.naver.com/search.naver?query=macbook",
+      },
+    ]);
+  });
+
+  it("selects the general Naver browser evaluate extractor", () => {
+    expect(
+      internals.resolveBrowserResultExtractionFunction(
+        "https://search.naver.com/search.naver?query=openclaw",
+      ),
+    ).toContain("resultType");
+    expect(
+      internals.resolveBrowserResultExtractionFunction(
+        "https://search.shopping.naver.com/search/all?query=macbook",
+      ),
+    ).not.toContain("판매처");
   });
 
   it("extracts and deduplicates URL results from browser snapshots", () => {

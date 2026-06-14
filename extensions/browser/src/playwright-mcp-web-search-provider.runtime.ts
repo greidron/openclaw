@@ -48,6 +48,14 @@ type BrowserSnapshotSearchResult = {
   url: string;
   snippet?: string;
   sourceUrl: string;
+  price?: string;
+  mallName?: string;
+  image?: string;
+  rating?: string;
+  reviewCount?: string;
+  delivery?: string;
+  category?: string;
+  resultType?: "web" | "shopping";
 };
 
 type McpToolPlan =
@@ -78,6 +86,30 @@ const BROWSER_SEARCH_RESULT_EXTRACTION_FUNCTION = `() => {
   }
   return entries;
 }`;
+const NAVER_SEARCH_RESULT_EXTRACTION_FUNCTION = `() => {
+  const text = (node) => (node?.innerText || node?.textContent || "").replace(/\\s+/g, " ").trim();
+  const anchors = Array.from(document.querySelectorAll("a[href]"));
+  const entries = [];
+  const seen = new Set();
+  for (const anchor of anchors) {
+    const href = anchor.href;
+    if (!href || seen.has(href) || !/^https?:\\/\\//i.test(href)) continue;
+    const host = new URL(href).hostname;
+    if (host.endsWith("naver.com")) continue;
+    const container = anchor.closest("li, .bx, .total_wrap, section, article, div") || anchor.parentElement;
+    const title = text(anchor) || href;
+    const body = text(container);
+    const snippet = body && body !== title ? body.replace(title, "").trim() : "";
+    const resultType = /쇼핑|가격|최저가|구매|판매처|무료배송|[0-9][0-9,]*\\s*원/.test(body) ? "shopping" : "web";
+    const price = ((body.match(/[0-9][0-9,]*\\s*원/) || [])[0] ?? "");
+    const mallName = ((body.match(/(?:판매처|몰)\\s*([^\\s]+)/) || [])[1] ?? "");
+    const reviewCount = ((body.match(/(?:리뷰|구매평|후기)\\s*([0-9,]+)/) || [])[1] ?? "");
+    seen.add(href);
+    entries.push({ title, url: href, snippet, price, mallName, reviewCount, resultType });
+    if (entries.length >= 20) break;
+  }
+  return entries;
+}`;
 const PRODUCT_SEARCH_HINTS = [
   "상품",
   "제품",
@@ -92,6 +124,30 @@ const PRODUCT_SEARCH_HINTS = [
   "buy",
   "deal",
   "best",
+  "cheap",
+  "cheapest",
+  "discount",
+  "sale",
+  "coupon",
+  "shipping",
+  "mall",
+  "store",
+  "where to buy",
+  "vs",
+  "versus",
+  "추천",
+  "할인",
+  "쿠폰",
+  "배송",
+  "무료배송",
+  "판매처",
+  "파는곳",
+  "어디서",
+  "싸게",
+  "저렴",
+  "가성비",
+  "스펙",
+  "모델",
 ];
 
 export async function executePlaywrightMcpWebSearchProviderTool(
@@ -275,6 +331,9 @@ async function runPlaywrightMcpBrowserSearch(params: {
     searchUrls: params.searchUrls,
     filters: buildFilterMetadata(params.engine, params.request, "browser"),
     results: dedupeBrowserSnapshotResults(results).slice(0, params.request.count),
+    naverShoppingResults: dedupeBrowserSnapshotResults(
+      results.filter((result) => result.resultType === "shopping"),
+    ).slice(0, params.request.count),
     content: wrapWebContent(sections.join("\n\n"), "web_search"),
   };
 }
@@ -285,10 +344,11 @@ async function tryExtractBrowserResultsWithEvaluate(
   timeoutSeconds: number,
 ): Promise<BrowserSnapshotSearchResult[]> {
   try {
+    const extractionFunction = resolveBrowserResultExtractionFunction(sourceUrl);
     const payload = await callPlaywrightMcpTool(
       client,
       "browser_evaluate",
-      { function: BROWSER_SEARCH_RESULT_EXTRACTION_FUNCTION },
+      { function: extractionFunction },
       timeoutSeconds,
     );
     return normalizeExtractedBrowserResults(payload, sourceUrl);
@@ -508,6 +568,10 @@ function normalizeMcpToolResponse(response: unknown): Record<string, unknown> {
     return record.structuredContent as Record<string, unknown>;
   }
   const text = stringifyMcpPayload(record);
+  const mcpResult = parseMcpMarkdownResult(text);
+  if (mcpResult) {
+    return normalizeMcpToolResponse(mcpResult);
+  }
   const parsed = parseJsonObject(text);
   if (parsed) {
     return parsed;
@@ -824,6 +888,22 @@ function parseJsonArray(text: string): unknown[] | undefined {
   }
 }
 
+function parseMcpMarkdownResult(text: string): unknown | undefined {
+  const match = text.match(/^### Result\s*\n([\s\S]*?)(?:\n### Ran Playwright code|\n```|$)/);
+  if (!match) {
+    return undefined;
+  }
+  const resultText = match[1]?.trim();
+  if (!resultText) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(resultText);
+  } catch {
+    return resultText;
+  }
+}
+
 function normalizeExtractedBrowserResults(
   payload: Record<string, unknown>,
   sourceUrl: string,
@@ -849,12 +929,45 @@ function normalizeExtractedBrowserResult(
   const title = typeof record.title === "string" && record.title.trim() ? record.title.trim() : url;
   const snippet =
     typeof record.snippet === "string" && record.snippet.trim() ? record.snippet.trim() : undefined;
+  const resultType = record.resultType === "shopping" ? "shopping" : "web";
   return {
     title,
     url,
     ...(snippet ? { snippet } : {}),
     sourceUrl,
+    ...(readOptionalString(record.price) ? { price: readOptionalString(record.price) } : {}),
+    ...(readOptionalString(record.mallName)
+      ? { mallName: readOptionalString(record.mallName) }
+      : {}),
+    ...(readOptionalString(record.image) ? { image: readOptionalString(record.image) } : {}),
+    ...(readOptionalString(record.rating) ? { rating: readOptionalString(record.rating) } : {}),
+    ...(readOptionalString(record.reviewCount)
+      ? { reviewCount: readOptionalString(record.reviewCount) }
+      : {}),
+    ...(readOptionalString(record.delivery)
+      ? { delivery: readOptionalString(record.delivery) }
+      : {}),
+    ...(readOptionalString(record.category)
+      ? { category: readOptionalString(record.category) }
+      : {}),
+    resultType,
   };
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function resolveBrowserResultExtractionFunction(sourceUrl: string): string {
+  try {
+    const url = new URL(sourceUrl);
+    if (url.hostname === "search.naver.com") {
+      return NAVER_SEARCH_RESULT_EXTRACTION_FUNCTION;
+    }
+  } catch {
+    // Fall through to the generic extractor for malformed source labels.
+  }
+  return BROWSER_SEARCH_RESULT_EXTRACTION_FUNCTION;
 }
 
 function buildFilterMetadata(
@@ -909,6 +1022,9 @@ export const __playwrightMcpWebSearchProviderTestInternals = {
   extractBrowserSnapshotResults,
   normalizeExtractedBrowserResults,
   normalizeMcpToolResponse,
+  parseMcpMarkdownResult,
   readPlaywrightMcpSearchRequest,
+  resolveBrowserResultExtractionFunction,
   resolvePlaywrightMcpMode,
+  resolvePlaywrightMcpSearchUrls,
 };
