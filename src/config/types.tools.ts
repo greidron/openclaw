@@ -645,8 +645,37 @@ export type ToolsConfig = {
         defaultEngine?: "google" | "duckduckgo" | "bing" | "naver";
         /** Execution policy: auto prefers browser extraction with tool fallback. */
         mode?: "auto" | "browser" | "tool";
-        /** Add a Naver search URL for product-style queries. */
-        includeNaverForProductSearch?: boolean;
+        /** Add Naver browser search when Naver API credentials are unavailable. */
+        includeNaverBrowserFallback?: boolean;
+        /** Optional Naver Search API enrichment. */
+        naverApi?: {
+          /** Enable API enrichment when credentials are configured. Default: true. */
+          enabled?: boolean;
+          /** Naver developer application client id. */
+          clientId?: SecretInput;
+          /** Naver developer application client secret. */
+          clientSecret?: SecretInput;
+          /** Optional Naver web document search enrichment. */
+          webSearch?: {
+            /** Enable web document API results. Default: true. */
+            enabled?: boolean;
+            /** API result count, clamped to 1-100. Defaults to web_search count. */
+            display?: number;
+          };
+          /** Optional Naver Shopping Search API enrichment. */
+          shoppingSearch?: {
+            /** Enable shopping API results. Default: true. */
+            enabled?: boolean;
+            /** API result count, clamped to 1-100. Defaults to web_search count. */
+            display?: number;
+            /** Naver Shopping sort: sim, date, asc, or dsc. */
+            sort?: "sim" | "date" | "asc" | "dsc";
+            /** Optional Naver Pay filter. */
+            filter?: "naverpay";
+            /** Optional exclusion filter. Defaults to rental for purchase-style queries. */
+            exclude?: "used" | "rental" | "cbshop";
+          };
+        };
       };
     } & Record<string, unknown>;
     /** X (formerly Twitter) search tool configuration using xAI Grok. */

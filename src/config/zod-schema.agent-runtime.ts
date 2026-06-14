@@ -405,7 +405,32 @@ const ToolsWebSearchSchema = z
             serverUrl: z.string().optional(),
             defaultEngine: z.enum(["google", "duckduckgo", "bing", "naver"]).optional(),
             mode: z.enum(["auto", "browser", "tool"]).optional(),
-            includeNaverForProductSearch: z.boolean().optional(),
+            includeNaverBrowserFallback: z.boolean().optional(),
+            naverApi: z
+              .object({
+                enabled: z.boolean().optional(),
+                clientId: SecretInputSchema.optional().register(sensitive),
+                clientSecret: SecretInputSchema.optional().register(sensitive),
+                webSearch: z
+                  .object({
+                    enabled: z.boolean().optional(),
+                    display: z.number().int().positive().max(100).optional(),
+                  })
+                  .strict()
+                  .optional(),
+                shoppingSearch: z
+                  .object({
+                    enabled: z.boolean().optional(),
+                    display: z.number().int().positive().max(100).optional(),
+                    sort: z.enum(["sim", "date", "asc", "dsc"]).optional(),
+                    filter: z.enum(["naverpay"]).optional(),
+                    exclude: z.enum(["used", "rental", "cbshop"]).optional(),
+                  })
+                  .strict()
+                  .optional(),
+              })
+              .strict()
+              .optional(),
           })
           .strict()
           .optional(),

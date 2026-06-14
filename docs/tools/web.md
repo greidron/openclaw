@@ -107,24 +107,24 @@ xAI Responses.
 
 ### Provider comparison
 
-| Provider                                         | Result style                                                   | Filters                                          | API key                                                                                  |
-| ------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| [Brave](/tools/brave-search)                     | Structured snippets                                            | Country, language, time, `llm-context` mode      | `BRAVE_API_KEY`                                                                          |
-| [Codex Hosted Search](/plugins/codex-harness)    | AI-synthesized + source URLs                                   | Domains, context size, user location             | None; uses Codex/OpenAI sign-in                                                          |
-| [DuckDuckGo](/tools/duckduckgo-search)           | Structured snippets                                            | --                                               | None (key-free)                                                                          |
-| [Exa](/tools/exa-search)                         | Structured + extracted                                         | Neural/keyword mode, date, content extraction    | `EXA_API_KEY`                                                                            |
-| [Firecrawl](/tools/firecrawl)                    | Structured snippets                                            | Via `firecrawl_search` tool                      | `FIRECRAWL_API_KEY`                                                                      |
-| [Gemini](/tools/gemini-search)                   | AI-synthesized + citations                                     | --                                               | `GEMINI_API_KEY`                                                                         |
-| [Grok](/tools/grok-search)                       | AI-synthesized + citations                                     | --                                               | xAI OAuth, `XAI_API_KEY`, or `plugins.entries.xai.config.webSearch.apiKey`               |
-| [Kimi](/tools/kimi-search)                       | AI-synthesized + citations; fails on ungrounded chat fallbacks | --                                               | `KIMI_API_KEY` / `MOONSHOT_API_KEY`                                                      |
-| [MiniMax Search](/tools/minimax-search)          | Structured snippets                                            | Region (`global` / `cn`)                         | `MINIMAX_CODE_PLAN_KEY` / `MINIMAX_CODING_API_KEY` / `MINIMAX_OAUTH_TOKEN`               |
-| [Ollama Web Search](/tools/ollama-search)        | Structured snippets                                            | --                                               | None for signed-in local hosts; `OLLAMA_API_KEY` for direct `https://ollama.com` search  |
-| [Playwright MCP](/tools/browser)                 | Browser page snapshots                                         | Engine, product-search Naver assist              | None; requires `PLAYWRIGHT_MCP_SERVER_URL` or `tools.web.search.playwrightMcp.serverUrl` |
-| [Parallel](/tools/parallel-search)               | Dense excerpts ranked for LLM context                          | --                                               | `PARALLEL_API_KEY` (paid)                                                                |
-| [Parallel Search (Free)](/tools/parallel-search) | Dense excerpts ranked for LLM context                          | --                                               | None (free Search MCP)                                                                   |
-| [Perplexity](/tools/perplexity-search)           | Structured snippets                                            | Country, language, time, domains, content limits | `PERPLEXITY_API_KEY` / `OPENROUTER_API_KEY`                                              |
-| [SearXNG](/tools/searxng-search)                 | Structured snippets                                            | Categories, language                             | None (self-hosted)                                                                       |
-| [Tavily](/tools/tavily)                          | Structured snippets                                            | Via `tavily_search` tool                         | `TAVILY_API_KEY`                                                                         |
+| Provider                                         | Result style                                                   | Filters                                          | API key                                                                                           |
+| ------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| [Brave](/tools/brave-search)                     | Structured snippets                                            | Country, language, time, `llm-context` mode      | `BRAVE_API_KEY`                                                                                   |
+| [Codex Hosted Search](/plugins/codex-harness)    | AI-synthesized + source URLs                                   | Domains, context size, user location             | None; uses Codex/OpenAI sign-in                                                                   |
+| [DuckDuckGo](/tools/duckduckgo-search)           | Structured snippets                                            | --                                               | None (key-free)                                                                                   |
+| [Exa](/tools/exa-search)                         | Structured + extracted                                         | Neural/keyword mode, date, content extraction    | `EXA_API_KEY`                                                                                     |
+| [Firecrawl](/tools/firecrawl)                    | Structured snippets                                            | Via `firecrawl_search` tool                      | `FIRECRAWL_API_KEY`                                                                               |
+| [Gemini](/tools/gemini-search)                   | AI-synthesized + citations                                     | --                                               | `GEMINI_API_KEY`                                                                                  |
+| [Grok](/tools/grok-search)                       | AI-synthesized + citations                                     | --                                               | xAI OAuth, `XAI_API_KEY`, or `plugins.entries.xai.config.webSearch.apiKey`                        |
+| [Kimi](/tools/kimi-search)                       | AI-synthesized + citations; fails on ungrounded chat fallbacks | --                                               | `KIMI_API_KEY` / `MOONSHOT_API_KEY`                                                               |
+| [MiniMax Search](/tools/minimax-search)          | Structured snippets                                            | Region (`global` / `cn`)                         | `MINIMAX_CODE_PLAN_KEY` / `MINIMAX_CODING_API_KEY` / `MINIMAX_OAUTH_TOKEN`                        |
+| [Ollama Web Search](/tools/ollama-search)        | Structured snippets                                            | --                                               | None for signed-in local hosts; `OLLAMA_API_KEY` for direct `https://ollama.com` search           |
+| [Playwright MCP](/tools/browser)                 | Browser page snapshots; optional Naver Search API enrichment   | Engine, Naver browser fallback, Naver Shopping   | `PLAYWRIGHT_MCP_SERVER_URL`; optional `NAVER_SHOPPING_CLIENT_ID` / `NAVER_SHOPPING_CLIENT_SECRET` |
+| [Parallel](/tools/parallel-search)               | Dense excerpts ranked for LLM context                          | --                                               | `PARALLEL_API_KEY` (paid)                                                                         |
+| [Parallel Search (Free)](/tools/parallel-search) | Dense excerpts ranked for LLM context                          | --                                               | None (free Search MCP)                                                                            |
+| [Perplexity](/tools/perplexity-search)           | Structured snippets                                            | Country, language, time, domains, content limits | `PERPLEXITY_API_KEY` / `OPENROUTER_API_KEY`                                                       |
+| [SearXNG](/tools/searxng-search)                 | Structured snippets                                            | Categories, language                             | None (self-hosted)                                                                                |
+| [Tavily](/tools/tavily)                          | Structured snippets                                            | Via `tavily_search` tool                         | `TAVILY_API_KEY`                                                                                  |
 
 ## Result shape
 
@@ -381,7 +381,7 @@ API-backed providers first:
 
 Key-free fallbacks after that:
 
-11. **Playwright MCP** -- browser-backed search through `PLAYWRIGHT_MCP_SERVER_URL` or `tools.web.search.playwrightMcp.serverUrl`; uses Google by default, supports `mode: "auto" | "browser" | "tool"`, and can add Naver for product-style queries (order 50)
+11. **Playwright MCP** -- browser-backed search through `PLAYWRIGHT_MCP_SERVER_URL` or `tools.web.search.playwrightMcp.serverUrl`; searches Google plus Naver by default, supports `mode: "auto" | "browser" | "tool"`, uses the Naver web document API when `NAVER_SHOPPING_CLIENT_ID` / `NAVER_SHOPPING_CLIENT_SECRET` or `tools.web.search.playwrightMcp.naverApi` credentials are configured, and falls back to Naver browser search only when those credentials are missing (order 50)
 12. **Parallel Search (Free)** -- the zero-config default: works with no account or API key via Parallel's free hosted [Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) (order 76)
 13. **DuckDuckGo** -- key-free HTML fallback with no account or API key (order 100)
 14. **Ollama Web Search** -- key-free fallback via your configured local Ollama host when it is reachable and signed in with `ollama signin`; can reuse Ollama provider bearer auth when the host needs it, and can call direct `https://ollama.com` search when configured with `OLLAMA_API_KEY` (order 110)
@@ -539,7 +539,13 @@ provider, OpenClaw does not show the `x_search` prompt.
   SearXNG accepts `http://` only for trusted private-network or loopback hosts;
   public SearXNG endpoints must use `https://`.
   Firecrawl and Tavily only support `query` and `count` through `web_search`
-  -- use their dedicated tools for advanced options.
+  -- use their dedicated tools for advanced options. Playwright MCP uses browser
+  search filters where the selected engine supports them; its optional Naver web
+  document API enrichment uses official Search API credentials when configured.
+  Shopping enrichment only runs for purchase-intent queries and supports
+  `display`, `sort`, `filter`, and `exclude` under
+  `tools.web.search.playwrightMcp.naverApi.shoppingSearch`; purchase-style
+  queries default to excluding rental listings.
 </Warning>
 
 ## x_search
