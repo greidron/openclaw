@@ -2,10 +2,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   readNumberParam,
+  readConfiguredSecretString,
+  readProviderEnvValue,
   readStringArrayParam,
   readStringParam,
   resolveSearchCount,
   resolveSearchTimeoutSeconds,
+  withTrustedWebSearchEndpoint,
   wrapWebContent,
 } from "openclaw/plugin-sdk/provider-web-search";
 
@@ -15,8 +18,24 @@ type PlaywrightMcpMode = (typeof PLAYWRIGHT_MCP_MODES)[number];
 type PlaywrightMcpSearchConfig = {
   playwrightMcp?: {
     defaultEngine?: string;
-    includeNaverForProductSearch?: boolean;
+    includeNaverBrowserFallback?: boolean;
     mode?: string;
+    naverApi?: {
+      enabled?: boolean;
+      clientId?: unknown;
+      clientSecret?: unknown;
+      webSearch?: {
+        enabled?: boolean;
+        display?: number;
+      };
+      shoppingSearch?: {
+        enabled?: boolean;
+        sort?: string;
+        filter?: string;
+        exclude?: string;
+        display?: number;
+      };
+    };
   };
   timeoutSeconds?: number;
   count?: number;
@@ -58,12 +77,72 @@ type BrowserSnapshotSearchResult = {
   resultType?: "web" | "shopping";
 };
 
+type NaverApiConfig = {
+  enabled?: boolean;
+  clientId?: unknown;
+  clientSecret?: unknown;
+  webSearch?: {
+    enabled?: boolean;
+    display?: number;
+  };
+  shoppingSearch?: NaverShoppingApiConfig;
+};
+
+type NaverShoppingApiConfig = {
+  enabled?: boolean;
+  sort?: string;
+  filter?: string;
+  exclude?: string;
+  display?: number;
+};
+
+type NaverApiCredentials = {
+  clientId: string;
+  clientSecret: string;
+};
+
+type NaverShoppingApiItem = {
+  title?: unknown;
+  link?: unknown;
+  image?: unknown;
+  lprice?: unknown;
+  hprice?: unknown;
+  mallName?: unknown;
+  productId?: unknown;
+  productType?: unknown;
+  maker?: unknown;
+  brand?: unknown;
+  category1?: unknown;
+  category2?: unknown;
+  category3?: unknown;
+  category4?: unknown;
+};
+
+type NaverShoppingApiResponse = {
+  items?: unknown;
+};
+
+type NaverWebApiItem = {
+  title?: unknown;
+  link?: unknown;
+  description?: unknown;
+};
+
+type NaverWebApiResponse = {
+  items?: unknown;
+};
+
 type McpToolPlan =
   | { mode: "browser_workflow"; toolName: "browser_navigate"; canEvaluate: boolean }
   | { mode: "tool_call"; toolName: string };
 
 const DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME = "web_search";
 const DEFAULT_PLAYWRIGHT_MCP_ENGINE = "google";
+const NAVER_WEB_API_ENDPOINT = "https://openapi.naver.com/v1/search/webkr.json";
+const NAVER_SHOPPING_API_ENDPOINT = "https://openapi.naver.com/v1/search/shop.json";
+const NAVER_SHOPPING_API_SORTS = ["sim", "date", "asc", "dsc"] as const;
+const NAVER_SHOPPING_API_FILTERS = ["naverpay"] as const;
+const NAVER_SHOPPING_API_EXCLUDES = ["used", "rental", "cbshop"] as const;
 const PLAYWRIGHT_MCP_ENGINES = ["google", "duckduckgo", "bing", "naver"] as const;
 const PLAYWRIGHT_MCP_MODES = ["auto", "browser", "tool"] as const;
 const BROWSER_SEARCH_RESULT_EXTRACTION_FUNCTION = `() => {
@@ -110,20 +189,15 @@ const NAVER_SEARCH_RESULT_EXTRACTION_FUNCTION = `() => {
   }
   return entries;
 }`;
-const PRODUCT_SEARCH_HINTS = [
+const SHOPPING_SEARCH_HINTS = [
   "상품",
-  "제품",
   "가격",
   "최저가",
-  "비교",
   "구매",
   "쇼핑",
-  "후기",
-  "review",
   "price",
   "buy",
   "deal",
-  "best",
   "cheap",
   "cheapest",
   "discount",
@@ -133,9 +207,6 @@ const PRODUCT_SEARCH_HINTS = [
   "mall",
   "store",
   "where to buy",
-  "vs",
-  "versus",
-  "추천",
   "할인",
   "쿠폰",
   "배송",
@@ -145,9 +216,6 @@ const PRODUCT_SEARCH_HINTS = [
   "어디서",
   "싸게",
   "저렴",
-  "가성비",
-  "스펙",
-  "모델",
 ];
 
 export async function executePlaywrightMcpWebSearchProviderTool(
@@ -160,12 +228,13 @@ export async function executePlaywrightMcpWebSearchProviderTool(
   const timeoutSeconds = resolveSearchTimeoutSeconds(searchConfig);
   const defaultEngine = resolvePlaywrightMcpDefaultEngine(searchConfig);
   const mode = request.mode ?? resolvePlaywrightMcpMode(searchConfig);
-  const includeNaverForProductSearch =
-    resolvePlaywrightMcpIncludeNaverForProductSearch(searchConfig);
+  const includeNaverBrowserFallback = resolvePlaywrightMcpIncludeNaverBrowserFallback(searchConfig);
+  const naverApi = resolveNaverApiCredentials(searchConfig);
   const searchUrls = resolvePlaywrightMcpSearchUrls({
     request,
     defaultEngine,
-    includeNaverForProductSearch,
+    includeNaverBrowserFallback,
+    naverApiAvailable: naverApi !== undefined,
   });
 
   const transport = new StreamableHTTPClientTransport(new URL(params.serverUrl), {
@@ -190,9 +259,15 @@ export async function executePlaywrightMcpWebSearchProviderTool(
       availableToolNames,
       mode,
     });
+    const naverApiResults = await runOptionalNaverApiSearch({
+      request,
+      searchConfig,
+      credentials: naverApi,
+      timeoutSeconds,
+    });
 
     if (toolPlan.mode === "tool_call") {
-      return runPlaywrightMcpDirectSearch({
+      const payload = await runPlaywrightMcpDirectSearch({
         client,
         toolName: toolPlan.toolName,
         request,
@@ -200,10 +275,11 @@ export async function executePlaywrightMcpWebSearchProviderTool(
         searchUrls,
         timeoutSeconds,
       });
+      return mergeNaverApiResults(payload, naverApiResults, request.count);
     }
 
     try {
-      return await runPlaywrightMcpBrowserSearch({
+      const payload = await runPlaywrightMcpBrowserSearch({
         client,
         request,
         engine: defaultEngine,
@@ -213,6 +289,7 @@ export async function executePlaywrightMcpWebSearchProviderTool(
         timeoutSeconds,
         signal: params.signal,
       });
+      return mergeNaverApiResults(payload, naverApiResults, request.count);
     } catch (error) {
       if (mode === "auto" && availableToolNames.includes(DEFAULT_PLAYWRIGHT_MCP_TOOL_NAME)) {
         const payload = await runPlaywrightMcpDirectSearch({
@@ -224,7 +301,7 @@ export async function executePlaywrightMcpWebSearchProviderTool(
           timeoutSeconds,
         });
         return {
-          ...payload,
+          ...mergeNaverApiResults(payload, naverApiResults, request.count),
           browserFallbackError: error instanceof Error ? error.message : String(error),
         };
       }
@@ -407,15 +484,349 @@ function resolvePlaywrightMcpToolPlan(params: {
 function resolvePlaywrightMcpSearchUrls(params: {
   request: PlaywrightMcpSearchRequest;
   defaultEngine: PlaywrightMcpEngine;
-  includeNaverForProductSearch: boolean;
+  includeNaverBrowserFallback: boolean;
+  naverApiAvailable: boolean;
 }): string[] {
-  const urls = params.request.searchQueries.map((query) =>
-    buildSearchUrl(params.defaultEngine, query, params.request),
-  );
-  if (params.includeNaverForProductSearch && isProductSearchQuery(params.request.query)) {
-    urls.push(buildSearchUrl("naver", params.request.query, params.request));
+  const browserEngines = new Set<PlaywrightMcpEngine>(["google"]);
+  if (params.defaultEngine !== "naver") {
+    browserEngines.add(params.defaultEngine);
+  }
+  if (!params.naverApiAvailable && params.includeNaverBrowserFallback) {
+    browserEngines.add("naver");
+  }
+
+  const urls: string[] = [];
+  for (const query of params.request.searchQueries) {
+    for (const engine of browserEngines) {
+      urls.push(buildSearchUrl(engine, query, params.request));
+    }
   }
   return Array.from(new Set(urls));
+}
+
+async function runOptionalNaverApiSearch(params: {
+  request: PlaywrightMcpSearchRequest;
+  searchConfig: PlaywrightMcpSearchConfig;
+  credentials: NaverApiCredentials | undefined;
+  timeoutSeconds: number;
+}): Promise<{
+  webResults: BrowserSnapshotSearchResult[];
+  shoppingResults: BrowserSnapshotSearchResult[];
+}> {
+  if (!params.credentials) {
+    return { webResults: [], shoppingResults: [] };
+  }
+  const config = params.searchConfig.playwrightMcp?.naverApi;
+  if (config?.enabled === false) {
+    return { webResults: [], shoppingResults: [] };
+  }
+
+  const [webResults, shoppingResults] = await Promise.all([
+    runOptionalNaverWebApiSearch({
+      request: params.request,
+      config: config?.webSearch,
+      credentials: params.credentials,
+      timeoutSeconds: params.timeoutSeconds,
+    }),
+    runOptionalNaverShoppingApiSearch({
+      request: params.request,
+      config: config?.shoppingSearch,
+      credentials: params.credentials,
+      timeoutSeconds: params.timeoutSeconds,
+    }),
+  ]);
+  return { webResults, shoppingResults };
+}
+
+async function runOptionalNaverWebApiSearch(params: {
+  request: PlaywrightMcpSearchRequest;
+  config: NaverApiConfig["webSearch"] | undefined;
+  credentials: NaverApiCredentials;
+  timeoutSeconds: number;
+}): Promise<BrowserSnapshotSearchResult[]> {
+  if (params.config?.enabled === false || !isShoppingSearchQuery(params.request.query)) {
+    return [];
+  }
+  try {
+    return await runNaverWebApiSearch({
+      query: params.request.query,
+      count: resolveNaverApiDisplay(params.config, params.request.count),
+      credentials: params.credentials,
+      timeoutSeconds: params.timeoutSeconds,
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function runOptionalNaverShoppingApiSearch(params: {
+  request: PlaywrightMcpSearchRequest;
+  config: NaverShoppingApiConfig | undefined;
+  credentials: NaverApiCredentials;
+  timeoutSeconds: number;
+}): Promise<BrowserSnapshotSearchResult[]> {
+  if (params.config?.enabled === false) {
+    return [];
+  }
+  try {
+    return await runNaverShoppingApiSearch({
+      query: params.request.query,
+      count: resolveNaverApiDisplay(params.config, params.request.count),
+      config: params.config,
+      credentials: params.credentials,
+      timeoutSeconds: params.timeoutSeconds,
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function runNaverWebApiSearch(params: {
+  query: string;
+  count: number;
+  credentials: NaverApiCredentials;
+  timeoutSeconds: number;
+}): Promise<BrowserSnapshotSearchResult[]> {
+  const url = new URL(NAVER_WEB_API_ENDPOINT);
+  url.searchParams.set("query", params.query);
+  url.searchParams.set("display", String(params.count));
+  url.searchParams.set("start", "1");
+
+  return await withTrustedWebSearchEndpoint(
+    {
+      url: url.toString(),
+      timeoutSeconds: params.timeoutSeconds,
+      init: {
+        method: "GET",
+        headers: buildNaverApiHeaders(params.credentials),
+      },
+    },
+    async (response) => {
+      if (!response.ok) {
+        throw new Error(`Naver web search API failed with HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as NaverWebApiResponse;
+      return normalizeNaverWebApiResults(payload);
+    },
+  );
+}
+
+async function runNaverShoppingApiSearch(params: {
+  query: string;
+  count: number;
+  config: NaverShoppingApiConfig | undefined;
+  credentials: NaverApiCredentials;
+  timeoutSeconds: number;
+}): Promise<BrowserSnapshotSearchResult[]> {
+  const url = new URL(NAVER_SHOPPING_API_ENDPOINT);
+  url.searchParams.set("query", params.query);
+  url.searchParams.set("display", String(params.count));
+  url.searchParams.set("start", "1");
+  applyNaverShoppingApiOptionalParam(url, "sort", params.config?.sort, NAVER_SHOPPING_API_SORTS);
+  applyNaverShoppingApiOptionalParam(
+    url,
+    "filter",
+    params.config?.filter,
+    NAVER_SHOPPING_API_FILTERS,
+  );
+  applyNaverShoppingApiOptionalParam(
+    url,
+    "exclude",
+    params.config?.exclude ?? "rental",
+    NAVER_SHOPPING_API_EXCLUDES,
+  );
+
+  return await withTrustedWebSearchEndpoint(
+    {
+      url: url.toString(),
+      timeoutSeconds: params.timeoutSeconds,
+      init: {
+        method: "GET",
+        headers: buildNaverApiHeaders(params.credentials),
+      },
+    },
+    async (response) => {
+      if (!response.ok) {
+        throw new Error(`Naver Shopping API failed with HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as NaverShoppingApiResponse;
+      return normalizeNaverShoppingApiResults(payload);
+    },
+  );
+}
+
+function mergeNaverApiResults(
+  payload: Record<string, unknown>,
+  naverApiResults: {
+    webResults: BrowserSnapshotSearchResult[];
+    shoppingResults: BrowserSnapshotSearchResult[];
+  },
+  count: number,
+): Record<string, unknown> {
+  const naverResults = [...naverApiResults.shoppingResults, ...naverApiResults.webResults];
+  if (naverResults.length === 0) {
+    return payload;
+  }
+  const existingResults = Array.isArray(payload.results)
+    ? payload.results.filter((entry): entry is BrowserSnapshotSearchResult =>
+        Boolean(entry && typeof entry === "object"),
+      )
+    : [];
+  const results = dedupeBrowserSnapshotResults([...naverResults, ...existingResults]);
+  return {
+    ...payload,
+    results: results.slice(0, count),
+    naverApiResults: naverResults.slice(0, count),
+    naverWebApiResults: naverApiResults.webResults.slice(0, count),
+    naverShoppingApiResults: naverApiResults.shoppingResults.slice(0, count),
+    naverShoppingResults: dedupeBrowserSnapshotResults([
+      ...naverApiResults.shoppingResults,
+      ...(Array.isArray(payload.naverShoppingResults)
+        ? payload.naverShoppingResults.filter((entry): entry is BrowserSnapshotSearchResult =>
+            Boolean(entry && typeof entry === "object"),
+          )
+        : []),
+    ]).slice(0, count),
+  };
+}
+
+function resolveNaverApiCredentials(
+  searchConfig: PlaywrightMcpSearchConfig,
+): NaverApiCredentials | undefined {
+  const config = searchConfig.playwrightMcp?.naverApi;
+  if (config?.enabled === false) {
+    return undefined;
+  }
+  const clientId =
+    readConfiguredSecretString(
+      config?.clientId,
+      "tools.web.search.playwrightMcp.naverApi.clientId",
+    ) ?? readProviderEnvValue(["NAVER_SHOPPING_CLIENT_ID", "NAVER_CLIENT_ID"]);
+  const clientSecret =
+    readConfiguredSecretString(
+      config?.clientSecret,
+      "tools.web.search.playwrightMcp.naverApi.clientSecret",
+    ) ?? readProviderEnvValue(["NAVER_SHOPPING_CLIENT_SECRET", "NAVER_CLIENT_SECRET"]);
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined;
+}
+
+function resolveNaverApiDisplay(
+  config: { display?: number } | undefined,
+  fallback: number,
+): number {
+  const configured =
+    typeof config?.display === "number" && Number.isInteger(config.display) && config.display > 0
+      ? config.display
+      : fallback;
+  return Math.max(1, Math.min(100, configured));
+}
+
+function buildNaverApiHeaders(credentials: NaverApiCredentials): HeadersInit {
+  return {
+    Accept: "application/json",
+    "X-Naver-Client-Id": credentials.clientId,
+    "X-Naver-Client-Secret": credentials.clientSecret,
+  };
+}
+
+function applyNaverShoppingApiOptionalParam<T extends readonly string[]>(
+  url: URL,
+  name: string,
+  value: string | undefined,
+  allowed: T,
+): void {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized && (allowed as readonly string[]).includes(normalized)) {
+    url.searchParams.set(name, normalized);
+  }
+}
+
+function normalizeNaverShoppingApiResults(
+  payload: NaverShoppingApiResponse,
+): BrowserSnapshotSearchResult[] {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items
+    .map(normalizeNaverShoppingApiResult)
+    .filter((entry): entry is BrowserSnapshotSearchResult => entry !== undefined);
+}
+
+function normalizeNaverWebApiResults(payload: NaverWebApiResponse): BrowserSnapshotSearchResult[] {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items
+    .map(normalizeNaverWebApiResult)
+    .filter((entry): entry is BrowserSnapshotSearchResult => entry !== undefined);
+}
+
+function normalizeNaverWebApiResult(entry: unknown): BrowserSnapshotSearchResult | undefined {
+  if (!entry || typeof entry !== "object") {
+    return undefined;
+  }
+  const record = entry as NaverWebApiItem;
+  const url = readOptionalString(record.link);
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return undefined;
+  }
+  return {
+    title: stripHtmlTags(readOptionalString(record.title) ?? url),
+    url,
+    ...(readOptionalString(record.description)
+      ? { snippet: stripHtmlTags(readOptionalString(record.description) ?? "") }
+      : {}),
+    sourceUrl: NAVER_WEB_API_ENDPOINT,
+    resultType: "web",
+  };
+}
+
+function normalizeNaverShoppingApiResult(entry: unknown): BrowserSnapshotSearchResult | undefined {
+  if (!entry || typeof entry !== "object") {
+    return undefined;
+  }
+  const record = entry as NaverShoppingApiItem;
+  const url = readOptionalString(record.link);
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return undefined;
+  }
+  const lowPrice = readOptionalString(record.lprice);
+  const highPrice = readOptionalString(record.hprice);
+  const category = [
+    readOptionalString(record.category1),
+    readOptionalString(record.category2),
+    readOptionalString(record.category3),
+    readOptionalString(record.category4),
+  ]
+    .filter(Boolean)
+    .join(" > ");
+  const snippetParts = [
+    lowPrice ? `최저가 ${formatWonPrice(lowPrice)}` : undefined,
+    highPrice && highPrice !== "0" ? `최고가 ${formatWonPrice(highPrice)}` : undefined,
+    readOptionalString(record.brand) ? `브랜드 ${readOptionalString(record.brand)}` : undefined,
+    category || undefined,
+  ].filter(Boolean);
+  return {
+    title: stripHtmlTags(readOptionalString(record.title) ?? url),
+    url,
+    ...(snippetParts.length ? { snippet: snippetParts.join(" · ") } : {}),
+    sourceUrl: NAVER_SHOPPING_API_ENDPOINT,
+    ...(lowPrice ? { price: formatWonPrice(lowPrice) } : {}),
+    ...(readOptionalString(record.mallName)
+      ? { mallName: readOptionalString(record.mallName) }
+      : {}),
+    ...(readOptionalString(record.image) ? { image: readOptionalString(record.image) } : {}),
+    ...(category ? { category } : {}),
+    resultType: "shopping",
+  };
+}
+
+function stripHtmlTags(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatWonPrice(value: string): string {
+  const numeric = value.replace(/[^\d]/g, "");
+  return numeric ? `${Number(numeric).toLocaleString("ko-KR")}원` : value;
 }
 
 function buildSearchUrl(
@@ -471,15 +882,15 @@ function resolvePlaywrightMcpMode(config: PlaywrightMcpSearchConfig): Playwright
   return fromEnv ?? "auto";
 }
 
-function resolvePlaywrightMcpIncludeNaverForProductSearch(
+function resolvePlaywrightMcpIncludeNaverBrowserFallback(
   config: PlaywrightMcpSearchConfig,
 ): boolean {
-  const configured = config.playwrightMcp?.includeNaverForProductSearch;
+  const configured = config.playwrightMcp?.includeNaverBrowserFallback;
   if (typeof configured === "boolean") {
     return configured;
   }
 
-  const fromEnv = process.env.PLAYWRIGHT_MCP_INCLUDE_NAVER_FOR_PRODUCT_SEARCH?.trim().toLowerCase();
+  const fromEnv = process.env.PLAYWRIGHT_MCP_INCLUDE_NAVER_BROWSER_FALLBACK?.trim().toLowerCase();
   if (fromEnv === "true" || fromEnv === "1") {
     return true;
   }
@@ -505,9 +916,9 @@ function normalizeMode(value: string | undefined): PlaywrightMcpMode | undefined
   return undefined;
 }
 
-function isProductSearchQuery(query: string): boolean {
+function isShoppingSearchQuery(query: string): boolean {
   const lower = query.toLowerCase();
-  return PRODUCT_SEARCH_HINTS.some((hint) => lower.includes(hint.toLowerCase()));
+  return SHOPPING_SEARCH_HINTS.some((hint) => lower.includes(hint.toLowerCase()));
 }
 
 function readPlaywrightMcpSearchConfig(searchConfig: unknown): PlaywrightMcpSearchConfig {
@@ -1020,11 +1431,16 @@ export const __playwrightMcpWebSearchProviderTestInternals = {
   buildSearchUrl,
   dedupeBrowserSnapshotResults,
   extractBrowserSnapshotResults,
+  mergeNaverApiResults,
   normalizeExtractedBrowserResults,
   normalizeMcpToolResponse,
+  normalizeNaverShoppingApiResults,
+  normalizeNaverWebApiResults,
   parseMcpMarkdownResult,
   readPlaywrightMcpSearchRequest,
   resolveBrowserResultExtractionFunction,
+  isShoppingSearchQuery,
+  resolveNaverApiCredentials,
   resolvePlaywrightMcpMode,
   resolvePlaywrightMcpSearchUrls,
 };
