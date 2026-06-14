@@ -404,6 +404,7 @@ const ToolsWebSearchSchema = z
           .object({
             serverUrl: z.string().optional(),
             defaultEngine: z.enum(["google", "duckduckgo", "bing", "naver"]).optional(),
+            mode: z.enum(["auto", "browser", "tool"]).optional(),
             includeNaverForProductSearch: z.boolean().optional(),
           })
           .strict()
