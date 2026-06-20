@@ -135,6 +135,53 @@ function matchesExplicitInstallRule(params: {
   return matchesPathMatcher(installRule.matcher, canonicalSourcePath);
 }
 
+function candidatesAreSamePackagedPluginVersion(params: {
+  left: PluginCandidate;
+  right: PluginCandidate;
+  leftManifest: PluginManifestRecord;
+  rightManifest: PluginManifestRecord;
+}): boolean {
+  const leftPackageName = params.left.packageName?.trim();
+  const rightPackageName = params.right.packageName?.trim();
+  if (!leftPackageName || leftPackageName !== rightPackageName) {
+    return false;
+  }
+  const leftVersion = params.left.packageVersion?.trim() || params.leftManifest.version?.trim();
+  const rightVersion = params.right.packageVersion?.trim() || params.rightManifest.version?.trim();
+  return Boolean(leftVersion && rightVersion && leftVersion === rightVersion);
+}
+
+function preferBundledEquivalentOverInstalledGlobal(params: {
+  left: PluginCandidate;
+  right: PluginCandidate;
+  leftManifest: PluginManifestRecord;
+  rightManifest: PluginManifestRecord;
+  provenance: PluginProvenanceIndex;
+  env: NodeJS.ProcessEnv;
+}): number | null {
+  const bundled = params.left.origin === "bundled" ? params.left : params.right;
+  const installed = params.left.origin === "global" ? params.left : params.right;
+  if (bundled.origin !== "bundled" || installed.origin !== "global") {
+    return null;
+  }
+  if (
+    !matchesExplicitInstallRule({
+      pluginId: params.leftManifest.id,
+      source: installed.source,
+      index: params.provenance,
+      env: params.env,
+    })
+  ) {
+    return null;
+  }
+  if (!candidatesAreSamePackagedPluginVersion(params)) {
+    return null;
+  }
+  // Same package/version bundled in the current runtime is equivalent to the
+  // managed npm copy, but avoids stale volume node_modules dependency drift.
+  return params.left.origin === "bundled" ? -1 : 1;
+}
+
 function resolveCandidateDuplicateRank(params: {
   candidate: PluginCandidate;
   manifestByRoot: Map<string, PluginManifestRecord>;
@@ -187,9 +234,22 @@ export function compareDuplicateCandidateOrder(params: {
   env: NodeJS.ProcessEnv;
 }): number {
   const leftPluginId = params.manifestByRoot.get(params.left.rootDir)?.id;
-  const rightPluginId = params.manifestByRoot.get(params.right.rootDir)?.id;
-  if (!leftPluginId || leftPluginId !== rightPluginId) {
+  const leftManifest = params.manifestByRoot.get(params.left.rootDir);
+  const rightManifest = params.manifestByRoot.get(params.right.rootDir);
+  const rightPluginId = rightManifest?.id;
+  if (!leftManifest || !rightManifest || !leftPluginId || leftPluginId !== rightPluginId) {
     return 0;
+  }
+  const equivalentBundledPreference = preferBundledEquivalentOverInstalledGlobal({
+    left: params.left,
+    right: params.right,
+    leftManifest,
+    rightManifest,
+    provenance: params.provenance,
+    env: params.env,
+  });
+  if (equivalentBundledPreference !== null) {
+    return equivalentBundledPreference;
   }
   return (
     resolveCandidateDuplicateRank({

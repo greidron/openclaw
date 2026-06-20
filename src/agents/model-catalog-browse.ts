@@ -56,18 +56,6 @@ function resolveModelCatalogBrowseTimeoutMs(value: number | undefined): number {
   );
 }
 
-/** True when a browse view cannot be answered from read-only cached catalog entries. */
-export function modelCatalogBrowseRequiresFullDiscovery(params: {
-  cfg: OpenClawConfig;
-  view?: ModelCatalogBrowseView;
-}): boolean {
-  const view = params.view ?? "default";
-  return (
-    view === "all" ||
-    parseConfiguredModelVisibilityEntries({ cfg: params.cfg }).providerWildcards.size > 0
-  );
-}
-
 /** Loads catalog entries for browse views, using read-only discovery unless full catalog is required. */
 export async function loadModelCatalogForBrowse(params: {
   cfg: OpenClawConfig;

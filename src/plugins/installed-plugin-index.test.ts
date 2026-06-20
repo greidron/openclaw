@@ -810,6 +810,65 @@ describe("installed plugin index", () => {
     expectSha256(plugin.installRecordHash);
   });
 
+  it("ranks same-version bundled packages over equivalent installed globals", () => {
+    const bundledDir = makeTempDir();
+    const globalDir = makeTempDir();
+    writeRuntimeEntry(bundledDir);
+    writeRuntimeEntry(globalDir);
+    writePackageJson(bundledDir, {
+      name: "@openclaw/duplicate-demo",
+      version: "2026.6.8",
+    });
+    writePackageJson(globalDir, {
+      name: "@openclaw/duplicate-demo",
+      version: "2026.6.8",
+    });
+    writePluginManifest(bundledDir, {
+      id: "duplicate-demo",
+      configSchema: { type: "object" },
+    });
+    writePluginManifest(globalDir, {
+      id: "duplicate-demo",
+      configSchema: { type: "object" },
+    });
+
+    const index = loadInstalledPluginIndex({
+      candidates: [
+        createPluginCandidate({
+          rootDir: bundledDir,
+          idHint: "duplicate-demo",
+          origin: "bundled",
+          packageName: "@openclaw/duplicate-demo",
+          packageVersion: "2026.6.8",
+        }),
+        createPluginCandidate({
+          rootDir: globalDir,
+          idHint: "duplicate-demo",
+          origin: "global",
+          packageName: "@openclaw/duplicate-demo",
+          packageVersion: "2026.6.8",
+        }),
+      ],
+      installRecords: {
+        "duplicate-demo": {
+          source: "npm",
+          spec: "@openclaw/duplicate-demo",
+          installPath: globalDir,
+          resolvedName: "@openclaw/duplicate-demo",
+          resolvedVersion: "2026.6.8",
+        },
+      },
+      env: hermeticEnv(),
+    });
+
+    expect(index.plugins).toHaveLength(1);
+    expectRecordFields(requireRecord(index.plugins[0], "installed plugin record"), {
+      pluginId: "duplicate-demo",
+      origin: "bundled",
+      rootDir: bundledDir,
+    });
+  });
+
   it("indexes npm plugin index records written before a process reload", () => {
     const fixture = createRichPluginFixture();
     const cfg = recordPluginInstall(

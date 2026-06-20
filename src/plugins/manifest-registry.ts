@@ -934,6 +934,45 @@ function isIntentionalInstalledBundledDuplicate(params: {
   );
 }
 
+function preferBundledSameVersionOverInstalledGlobal(params: {
+  pluginId: string;
+  left: PluginCandidate;
+  right: PluginCandidate;
+  config?: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  installRecords: Record<string, PluginInstallRecord>;
+}): PluginCandidate | null {
+  const bundled = params.left.origin === "bundled" ? params.left : params.right;
+  const global = params.left.origin === "global" ? params.left : params.right;
+  if (bundled.origin !== "bundled" || global.origin !== "global") {
+    return null;
+  }
+  if (
+    !matchesInstalledPluginRecord({
+      pluginId: params.pluginId,
+      candidate: global,
+      config: params.config,
+      env: params.env,
+      installRecords: params.installRecords,
+    })
+  ) {
+    return null;
+  }
+  const bundledPackageName = normalizeOptionalString(bundled.packageName);
+  const globalPackageName = normalizeOptionalString(global.packageName);
+  if (!bundledPackageName || bundledPackageName !== globalPackageName) {
+    return null;
+  }
+  const bundledPackageVersion = normalizeOptionalString(bundled.packageVersion);
+  const globalPackageVersion = normalizeOptionalString(global.packageVersion);
+  if (!bundledPackageVersion || bundledPackageVersion !== globalPackageVersion) {
+    return null;
+  }
+  // The current runtime's bundled copy is the same package release as the
+  // managed npm install, but cannot suffer stale volume node_modules drift.
+  return bundled;
+}
+
 function isSameGlobalPackageDuplicate(left: PluginCandidate, right: PluginCandidate): boolean {
   if (left.origin !== "global" || right.origin !== "global") {
     return false;
@@ -1147,6 +1186,14 @@ export function loadPluginManifestRegistry(
         continue;
       }
 
+      const bundledSameVersionWinner = preferBundledSameVersionOverInstalledGlobal({
+        pluginId: manifest.id,
+        left: candidate,
+        right: existing.candidate,
+        config,
+        env,
+        installRecords: getInstallRecords(),
+      });
       const candidateRank = resolveDuplicatePrecedenceRank({
         pluginId: manifest.id,
         candidate,
@@ -1161,7 +1208,9 @@ export function loadPluginManifestRegistry(
         env,
         installRecords: getInstallRecords(),
       });
-      const candidateWins = candidateRank < existingRank;
+      const candidateWins = bundledSameVersionWinner
+        ? bundledSameVersionWinner === candidate
+        : candidateRank < existingRank;
       const winnerCandidate = candidateWins ? candidate : existing.candidate;
       const overriddenCandidate = candidateWins ? existing.candidate : candidate;
       if (candidateWins) {
