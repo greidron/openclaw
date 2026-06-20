@@ -172,6 +172,10 @@ export function resolvePluginRuntimeLoadContext(
           env,
           workspaceDir: rawWorkspaceDir,
           allowWorkspaceScopedCurrent: true,
+          // Runtime activation must reflect the current image and install records.
+          // Persisted registries can keep loading stale npm project paths after a
+          // bundled plugin ships the same package/version with repaired deps.
+          preferPersisted: false,
         })
       : undefined;
   const manifestRegistry = options?.manifestRegistry ?? initialMetadataSnapshot?.manifestRegistry;
@@ -206,6 +210,7 @@ export function resolvePluginRuntimeLoadContext(
             workspaceDir,
             allowWorkspaceScopedCurrent: true,
             ...(initialMetadataSnapshot ? { index: initialMetadataSnapshot.index } : {}),
+            preferPersisted: false,
           });
   const finalManifestRegistry = options?.manifestRegistry ?? metadataSnapshot?.manifestRegistry;
   const installRecords = metadataSnapshot

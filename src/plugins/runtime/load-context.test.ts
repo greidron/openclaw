@@ -132,6 +132,7 @@ describe("resolvePluginRuntimeLoadContext", () => {
       allowWorkspaceScopedCurrent: true,
       config: rawConfig,
       env,
+      preferPersisted: false,
       workspaceDir: "/resolved-workspace",
     });
     expect(applyPluginAutoEnableMock).toHaveBeenCalledWith({
