@@ -126,46 +126,6 @@ export function resolveCopilotExtendedThinkingLevels(
   return levels;
 }
 
-function compatSupportsEffort(
-  compat: CopilotReasoningCompat | null | undefined,
-  effort: "xhigh" | "max",
-): boolean {
-  return (
-    Array.isArray(compat?.supportedReasoningEfforts) &&
-    compat.supportedReasoningEfforts.some(
-      (candidate) => normalizeOptionalLowercaseString(candidate) === effort,
-    )
-  );
-}
-
-export function resolveCopilotExtendedThinkingLevels(
-  modelId: string,
-  compat?: CopilotReasoningCompat | null,
-): Array<"xhigh" | "max"> {
-  const normalizedModelId = normalizeOptionalLowercaseString(modelId) ?? "";
-  const staticCompat = resolveStaticCopilotModelOverride(normalizedModelId)?.compat;
-  const isClaudeModel = normalizedModelId.includes("claude");
-  const supportsAdaptiveClaudeEffort =
-    !isClaudeModel || supportsClaudeAdaptiveThinking({ id: normalizedModelId });
-  const levels: Array<"xhigh" | "max"> = [];
-  if (
-    supportsAdaptiveClaudeEffort &&
-    (COPILOT_XHIGH_MODEL_IDS.has(normalizedModelId) ||
-      compatSupportsEffort(compat, "xhigh") ||
-      compatSupportsEffort(staticCompat, "xhigh"))
-  ) {
-    levels.push("xhigh");
-  }
-  if (
-    isClaudeModel &&
-    supportsAdaptiveClaudeEffort &&
-    (compatSupportsEffort(compat, "max") || compatSupportsEffort(staticCompat, "max"))
-  ) {
-    levels.push("max");
-  }
-  return levels;
-}
-
 export function resolveStaticCopilotModelOverride(
   modelId: string,
 ): Partial<ModelDefinitionConfig> | undefined {
