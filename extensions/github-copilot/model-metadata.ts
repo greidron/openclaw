@@ -56,6 +56,10 @@ function isCopilotGeminiModelId(modelId: string): boolean {
   return /(?:^|[-_.])gemini(?:$|[-_.])/.test(modelId);
 }
 
+function isCopilotClaude45ModelId(modelId: string): boolean {
+  return /^claude-(?:haiku|opus|sonnet)-4[.-]5(?:$|[-.])/.test(modelId);
+}
+
 export function resolveCopilotTransportApi(modelId: string): CopilotRuntimeApi {
   const normalized = normalizeOptionalLowercaseString(modelId) ?? "";
   if (normalized.includes("claude")) {
@@ -71,7 +75,55 @@ export function resolveCopilotModelCompat(
   modelId: string,
 ): ModelDefinitionConfig["compat"] | undefined {
   const normalized = normalizeOptionalLowercaseString(modelId) ?? "";
-  return isCopilotGeminiModelId(normalized) ? { ...COPILOT_CHAT_COMPLETIONS_COMPAT } : undefined;
+  if (isCopilotGeminiModelId(normalized)) {
+    return { ...COPILOT_CHAT_COMPLETIONS_COMPAT };
+  }
+  // Copilot's Claude 4.5 endpoints reject Anthropic's eager tool extension,
+  // while current Claude 4.6+ endpoints accept it.
+  if (isCopilotClaude45ModelId(normalized)) {
+    return { supportsEagerToolInputStreaming: false };
+  }
+  return undefined;
+}
+
+function compatSupportsEffort(
+  compat: CopilotReasoningCompat | null | undefined,
+  effort: "xhigh" | "max",
+): boolean {
+  return (
+    Array.isArray(compat?.supportedReasoningEfforts) &&
+    compat.supportedReasoningEfforts.some(
+      (candidate) => normalizeOptionalLowercaseString(candidate) === effort,
+    )
+  );
+}
+
+export function resolveCopilotExtendedThinkingLevels(
+  modelId: string,
+  compat?: CopilotReasoningCompat | null,
+): Array<"xhigh" | "max"> {
+  const normalizedModelId = normalizeOptionalLowercaseString(modelId) ?? "";
+  const staticCompat = resolveStaticCopilotModelOverride(normalizedModelId)?.compat;
+  const isClaudeModel = normalizedModelId.includes("claude");
+  const supportsAdaptiveClaudeEffort =
+    !isClaudeModel || supportsClaudeAdaptiveThinking({ id: normalizedModelId });
+  const levels: Array<"xhigh" | "max"> = [];
+  if (
+    supportsAdaptiveClaudeEffort &&
+    (COPILOT_XHIGH_MODEL_IDS.has(normalizedModelId) ||
+      compatSupportsEffort(compat, "xhigh") ||
+      compatSupportsEffort(staticCompat, "xhigh"))
+  ) {
+    levels.push("xhigh");
+  }
+  if (
+    isClaudeModel &&
+    supportsAdaptiveClaudeEffort &&
+    (compatSupportsEffort(compat, "max") || compatSupportsEffort(staticCompat, "max"))
+  ) {
+    levels.push("max");
+  }
+  return levels;
 }
 
 function compatSupportsEffort(

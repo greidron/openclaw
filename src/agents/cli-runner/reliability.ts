@@ -12,6 +12,7 @@ import {
 } from "../cli-watchdog-defaults.js";
 import type { EmbeddedRunTrigger } from "../embedded-agent-runner/run/params.js";
 import { AGENT_LANE_SUBAGENT } from "../lanes.js";
+import { AGENT_LANE_SUBAGENT } from "../lanes.js";
 
 function pickWatchdogProfile(
   backend: CliBackendConfig,

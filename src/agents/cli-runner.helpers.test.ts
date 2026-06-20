@@ -562,6 +562,62 @@ describe("resolveCliRunQueueKey", () => {
       }),
     ).toBe("claude-cli:run-4");
   });
+
+  it("keeps Claude live sessions serialized when serialize=false", () => {
+    expect(
+      resolveCliRunQueueKey({
+        backendId: "claude-cli",
+        liveSession: "claude-stdio",
+        serialize: false,
+        runId: "run-live",
+        workspaceDir: "/tmp/project-a",
+        ownerKey: "abcd1234",
+      }),
+    ).toBe("claude-cli:owner:abcd1234");
+  });
+
+  it("keeps resumed Claude live sessions on the owner lane", () => {
+    expect(
+      resolveCliRunQueueKey({
+        backendId: "claude-cli",
+        liveSession: "claude-stdio",
+        serialize: true,
+        runId: "run-live-resumed",
+        workspaceDir: "/tmp/project-a",
+        cliSessionId: "claude-session-123",
+        ownerKey: "abcd1234",
+      }),
+    ).toBe("claude-cli:owner:abcd1234");
+  });
+});
+
+describe("buildClaudeOwnerKey", () => {
+  it("is deterministic and distinguishes session keys", () => {
+    const base = {
+      agentAccountId: "acct-1",
+      agentId: "agent-main",
+      authProfileId: "profile-a",
+      sessionId: "sess-1",
+      sessionKey: "key-a",
+    };
+    const a1 = buildClaudeOwnerKey(base);
+    const a2 = buildClaudeOwnerKey(base);
+    expect(a1).toBe(a2);
+    const b = buildClaudeOwnerKey({ ...base, sessionKey: "key-b" });
+    expect(a1).not.toBe(b);
+  });
+
+  it("matches the legacy buildClaudeLiveKey hash for a frozen fixture (DO NOT EDIT — splits queue from live-session map)", () => {
+    expect(
+      buildClaudeOwnerKey({
+        agentAccountId: "acct-1",
+        agentId: "agent-main",
+        authProfileId: "profile-a",
+        sessionId: "sess-1",
+        sessionKey: "key-a",
+      }),
+    ).toBe("718b9a6cf473526c3c357883dfc8f1da1cf90b709d9ed38d675b52314abe6800");
+  });
 });
 
 describe("buildClaudeOwnerKey", () => {

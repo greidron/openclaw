@@ -14,6 +14,7 @@ type TerminalNote = (message: string, title?: string) => void;
 const terminalNoteMock = vi.hoisted(() => vi.fn<TerminalNote>());
 const callGatewayMock = vi.hoisted(() => vi.fn());
 const runDoctorRepairSequenceMock = vi.hoisted(() => vi.fn());
+const collectDoctorPreviewNotesParamsMock = vi.hoisted(() => vi.fn());
 const collectImplicitFallbackClobberWarningsMock = vi.hoisted(() =>
   vi.fn<(cfg: unknown) => string[]>(() => []),
 );
@@ -1233,10 +1234,13 @@ vi.mock("./doctor/shared/preview-warnings.js", () => {
   }
 
   return {
-    collectDoctorPreviewNotes: vi.fn(async (params) => ({
-      infoNotes: [],
-      warningNotes: await collectWarnings(params),
-    })),
+    collectDoctorPreviewNotes: vi.fn(async (params) => {
+      collectDoctorPreviewNotesParamsMock(params);
+      return {
+        infoNotes: [],
+        warningNotes: await collectWarnings(params),
+      };
+    }),
     collectDoctorPreviewWarnings: vi.fn(collectWarnings),
   };
 });
@@ -1505,6 +1509,7 @@ describe("doctor config flow", () => {
     callGatewayMock.mockReset();
     callGatewayMock.mockResolvedValue({});
     runDoctorRepairSequenceMock.mockReset();
+    collectDoctorPreviewNotesParamsMock.mockClear();
     collectImplicitFallbackClobberWarningsMock.mockClear();
     collectImplicitFallbackClobberWarningsMock.mockReturnValue([]);
     noteImplicitFallbackClobberWarningsMock.mockClear();
@@ -1522,6 +1527,35 @@ describe("doctor config flow", () => {
     expect((result.cfg as Record<string, unknown>).gateway).toEqual({
       auth: { mode: "token", token: 123 },
     });
+  });
+
+  it("collects plugin blocker previews from the pre-auto-enable config", async () => {
+    await runDoctorConfigWithInput({
+      config: {
+        plugins: {
+          allow: ["existing-plugin"],
+        },
+        tools: {
+          alsoAllow: ["browser"],
+        },
+      },
+      run: loadAndMaybeMigrateDoctorConfig,
+    });
+
+    expect(collectDoctorPreviewNotesParamsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: expect.objectContaining({
+          plugins: expect.objectContaining({
+            allow: ["existing-plugin", "browser"],
+          }),
+        }),
+        activationSourceConfig: expect.objectContaining({
+          plugins: expect.objectContaining({
+            allow: ["existing-plugin"],
+          }),
+        }),
+      }),
+    );
   });
 
   it("reloads gateway secrets and refreshes auth status after auth profile repairs", async () => {
