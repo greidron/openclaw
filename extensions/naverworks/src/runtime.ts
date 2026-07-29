@@ -1,7 +1,10 @@
-import { createPluginRuntimeStore } from "openclaw/plugin-sdk/compat";
-import type { PluginRuntime } from "openclaw/plugin-sdk/naverworks";
+import type { PluginRuntime } from "openclaw/plugin-sdk/core";
+import { createPluginRuntimeStore } from "openclaw/plugin-sdk/runtime-store";
 
 const { setRuntime: setNaverWorksRuntime, getRuntime: getNaverWorksRuntime } =
-  createPluginRuntimeStore<PluginRuntime>("NAVER WORKS runtime not initialized");
+  createPluginRuntimeStore<PluginRuntime>({
+    pluginId: "naverworks",
+    errorMessage: "NAVER WORKS runtime not initialized",
+  });
 
 export { getNaverWorksRuntime, setNaverWorksRuntime };

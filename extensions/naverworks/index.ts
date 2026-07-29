@@ -1,17 +1,16 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
-import { createNaverWorksPlugin } from "./src/channel.js";
-import { setNaverWorksRuntime } from "./src/runtime.js";
+import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-contract";
 
-const plugin = {
+export default defineBundledChannelEntry({
   id: "naverworks",
   name: "NAVER WORKS",
   description: "NAVER WORKS channel plugin for OpenClaw",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: OpenClawPluginApi) {
-    setNaverWorksRuntime(api.runtime);
-    api.registerChannel({ plugin: createNaverWorksPlugin() });
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./src/channel.js",
+    exportName: "naverWorksPlugin",
   },
-};
-
-export default plugin;
+  runtime: {
+    specifier: "./src/runtime.js",
+    exportName: "setNaverWorksRuntime",
+  },
+});

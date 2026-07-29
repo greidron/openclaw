@@ -767,3 +767,5 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
     },
   };
 }
+
+export const naverWorksPlugin = createNaverWorksPlugin();
