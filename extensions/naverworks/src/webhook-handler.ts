@@ -38,6 +38,66 @@ function asString(value: unknown): string | undefined {
   return undefined;
 }
 
+function describeValueType(value: unknown): string {
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  return typeof value;
+}
+
+function describeObjectShape(value: unknown): string {
+  const object = asObject(value);
+  const entries = Object.entries(object)
+    .slice(0, 20)
+    .map(([key, child]) => `${key}:${describeValueType(child)}`);
+  return entries.length > 0 ? entries.join(",") : "-";
+}
+
+function describeObjectKeys(value: unknown): string {
+  const keys = Object.keys(asObject(value)).slice(0, 30);
+  return keys.length > 0 ? keys.join(",") : "-";
+}
+
+export function summarizeNaverWorksWebhookPayloadForLog(rawBody: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `json=parse_error error=${JSON.stringify(message)}`;
+  }
+
+  const root = asObject(parsed);
+  const source = asObject(root.source);
+  const user = asObject(root.user);
+  const content = asObject(root.content);
+  const message = asObject(root.message);
+  const userId = pickFirstString([
+    source.userId,
+    source.user_id,
+    user.userId,
+    user.user_id,
+    root.userId,
+    root.user_id,
+    root.senderId,
+  ]);
+
+  return [
+    "json=ok",
+    `rootType=${describeValueType(parsed)}`,
+    `rootKeys=${describeObjectKeys(root)}`,
+    `sourceKeys=${describeObjectKeys(source)}`,
+    `userKeys=${describeObjectKeys(user)}`,
+    `contentKeys=${describeObjectKeys(content)}`,
+    `messageKeys=${describeObjectKeys(message)}`,
+    `eventType=${JSON.stringify(asString(root.type) ?? "-")}`,
+    `contentType=${JSON.stringify(asString(content.type) ?? asString(message.type) ?? "-")}`,
+    `hasUserId=${userId ? "yes" : "no"}`,
+    `hasContentFileId=${pickFirstString([content.fileId, content.resourceId, content.id]) ? "yes" : "no"}`,
+    `sourceShape=${describeObjectShape(source)}`,
+    `contentShape=${describeObjectShape(content)}`,
+  ].join(" ");
+}
+
 function parseNaverWorksLocation(
   raw: Record<string, unknown>,
 ): NaverWorksInboundEvent["location"] | undefined {
@@ -524,7 +584,9 @@ export function createNaverWorksWebhookHandler(deps: NaverWorksWebhookDeps) {
 
     const event = parseNaverWorksInbound(rawBody);
     if (!event) {
-      log?.warn?.(`naverworks[${account.accountId}]: invalid webhook payload`);
+      log?.warn?.(
+        `naverworks[${account.accountId}]: invalid webhook payload ${summarizeNaverWorksWebhookPayloadForLog(rawBody)}`,
+      );
       respondJson(res, 400, { error: "Invalid NAVER WORKS event payload" });
       return;
     }

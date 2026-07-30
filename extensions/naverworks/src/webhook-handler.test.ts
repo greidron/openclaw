@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseNaverWorksInbound, verifyNaverWorksSignature } from "./webhook-handler.js";
+import {
+  parseNaverWorksInbound,
+  summarizeNaverWorksWebhookPayloadForLog,
+  verifyNaverWorksSignature,
+} from "./webhook-handler.js";
 
 describe("parseNaverWorksInbound", () => {
   it("parses direct message payload with team + user ids", () => {
@@ -282,5 +286,35 @@ describe("verifyNaverWorksSignature", () => {
         headerSignature: "invalid-signature",
       }),
     ).toBe(false);
+  });
+});
+
+describe("summarizeNaverWorksWebhookPayloadForLog", () => {
+  it("reports payload shape without exposing user text or file ids", () => {
+    const summary = summarizeNaverWorksWebhookPayloadForLog(
+      JSON.stringify({
+        type: "message",
+        source: {
+          userId: "sensitive-user-id",
+          domainId: 300098522,
+        },
+        content: {
+          type: "image",
+          fileId: "sensitive-file-id",
+          text: "private text",
+        },
+      }),
+    );
+
+    expect(summary).toContain("json=ok");
+    expect(summary).toContain('eventType="message"');
+    expect(summary).toContain('contentType="image"');
+    expect(summary).toContain("hasUserId=yes");
+    expect(summary).toContain("hasContentFileId=yes");
+    expect(summary).toContain("sourceShape=userId:string,domainId:number");
+    expect(summary).toContain("contentShape=type:string,fileId:string,text:string");
+    expect(summary).not.toContain("sensitive-user-id");
+    expect(summary).not.toContain("sensitive-file-id");
+    expect(summary).not.toContain("private text");
   });
 });
