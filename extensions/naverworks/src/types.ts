@@ -52,6 +52,7 @@ export type NaverWorksInboundEvent = {
     isLive?: boolean;
   };
   mediaUrl?: string;
+  mediaFileId?: string;
   mediaKind?: "image" | "audio" | "file";
   mediaMimeType?: string;
   mediaFileName?: string;

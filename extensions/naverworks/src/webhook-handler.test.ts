@@ -38,7 +38,7 @@ describe("parseNaverWorksInbound", () => {
     expect(parsed?.teamId).toBe("12345");
   });
 
-  it("parses image-only payloads without text", () => {
+  it("parses image-only payloads with direct URLs without text", () => {
     const payload = JSON.stringify({
       source: { userId: "u3", teamId: "team-a" },
       content: {
@@ -59,6 +59,30 @@ describe("parseNaverWorksInbound", () => {
         mediaUrl: "https://cdn.example.com/img-1.png",
         mediaFileName: "img-1.png",
         mediaMimeType: "image/png",
+        isDirect: true,
+      }),
+    );
+  });
+
+  it("parses image-only payloads with NAVER WORKS fileId", () => {
+    const payload = JSON.stringify({
+      type: "message",
+      source: { userId: "u3", domainId: 300098522 },
+      content: {
+        type: "image",
+        fileId: "WAAAQPwBexX2HnseNvvM9Zyhvp2kIRF3Ul7L7/aMVti8=",
+      },
+    });
+
+    const parsed = parseNaverWorksInbound(payload);
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        userId: "u3",
+        teamId: "300098522",
+        text: undefined,
+        mediaKind: "image",
+        mediaUrl: undefined,
+        mediaFileId: "WAAAQPwBexX2HnseNvvM9Zyhvp2kIRF3Ul7L7/aMVti8=",
         isDirect: true,
       }),
     );

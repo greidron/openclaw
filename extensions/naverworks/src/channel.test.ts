@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveAccount } from "./accounts.js";
-import { createNaverWorksPlugin, resolveAutoThinkingDirective } from "./channel.js";
+import {
+  createNaverWorksPlugin,
+  downloadNaverWorksInboundMedia,
+  resolveAutoThinkingDirective,
+  resolveNaverWorksAttachmentDownloadUrl,
+} from "./channel.js";
 import { setNaverWorksRuntime } from "./runtime.js";
 
 describe("naverworks channel plugin", () => {
@@ -87,6 +92,115 @@ describe("naverworks channel plugin", () => {
     expect(
       String((fetchMock.mock.calls[1]?.[1] as { body?: string } | undefined)?.body ?? ""),
     ).toContain('"type":"image"');
+  });
+
+  it("resolves NAVER WORKS attachment fileId through the authenticated redirect", async () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            botId: "bot-1",
+            accessToken: "token-1",
+          },
+        },
+      },
+      "default",
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("", {
+          status: 302,
+          headers: {
+            Location: "https://apis-storage.worksmobile.com/download/file-1",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveNaverWorksAttachmentDownloadUrl({
+        account,
+        fileId: "file/with=safe-encoding",
+        headers: { Authorization: "Bearer token-1" },
+      }),
+    ).resolves.toBe("https://apis-storage.worksmobile.com/download/file-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://www.worksapis.com/v1.0/bots/bot-1/attachments/file%2Fwith%3Dsafe-encoding",
+      expect.objectContaining({
+        redirect: "manual",
+        headers: { Authorization: "Bearer token-1" },
+      }),
+    );
+  });
+
+  it("downloads NAVER WORKS fileId media through the authenticated storage URL", async () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            botId: "bot-1",
+            accessToken: "token-1",
+          },
+        },
+      },
+      "default",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("", {
+            status: 302,
+            headers: {
+              Location: "https://apis-storage.worksmobile.com/download/file-1",
+            },
+          }),
+      ),
+    );
+    const fetchRemoteMedia = vi.fn(async () => ({
+      buffer: Buffer.from("image"),
+      contentType: "image/png",
+      fileName: "photo.png",
+    }));
+    const saveMediaBuffer = vi.fn(async () => ({
+      path: "/tmp/openclaw-naverworks/photo.png",
+      contentType: "image/png",
+    }));
+
+    await expect(
+      downloadNaverWorksInboundMedia({
+        runtime: {
+          channel: {
+            media: {
+              fetchRemoteMedia,
+              saveMediaBuffer,
+            },
+          },
+        } as never,
+        account,
+        event: {
+          mediaFileId: "file-1",
+          mediaKind: "image",
+        },
+      }),
+    ).resolves.toEqual({
+      path: "/tmp/openclaw-naverworks/photo.png",
+      mediaType: "image/png",
+    });
+
+    expect(fetchRemoteMedia).toHaveBeenCalledWith({
+      url: "https://apis-storage.worksmobile.com/download/file-1",
+      maxBytes: 20 * 1024 * 1024,
+      requestInit: { headers: { Authorization: "Bearer token-1" } },
+    });
+    expect(saveMediaBuffer).toHaveBeenCalledWith(
+      Buffer.from("image"),
+      "image/png",
+      "inbound",
+      20 * 1024 * 1024,
+      "photo.png",
+    );
   });
 
   it("resolves auto thinking directive from keyword rules", () => {

@@ -207,10 +207,80 @@ function isNaverWorksConfigured(account: ReturnType<typeof resolveAccount>): boo
   return Boolean(account.botId?.trim()) && hasNaverWorksOutboundAuth(account);
 }
 
-async function downloadInboundMedia(params: {
+function defaultInboundMediaType(kind?: string): string | undefined {
+  if (kind === "image") return "image/jpeg";
+  if (kind === "audio") return "audio/mpeg";
+  if (kind === "file") return "application/octet-stream";
+  return undefined;
+}
+
+function buildAttachmentEndpoint(params: {
+  account: ReturnType<typeof resolveAccount>;
+  fileId: string;
+}): string {
+  return `${params.account.apiBaseUrl.replace(/\/$/, "")}/bots/${encodeURIComponent(
+    params.account.botId ?? "",
+  )}/attachments/${encodeURIComponent(params.fileId)}`;
+}
+
+function isNaverWorksStorageHost(hostname: string): boolean {
+  return (
+    hostname === "storage.worksmobile.com" ||
+    hostname.endsWith(".storage.worksmobile.com") ||
+    hostname === "apis-storage.worksmobile.com" ||
+    hostname.endsWith(".apis-storage.worksmobile.com")
+  );
+}
+
+function shouldAuthenticateDirectMediaUrl(params: {
+  account: ReturnType<typeof resolveAccount>;
+  url: string;
+}): boolean {
+  try {
+    return new URL(params.url).origin === new URL(params.account.apiBaseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveNaverWorksAttachmentDownloadUrl(params: {
+  account: ReturnType<typeof resolveAccount>;
+  fileId: string;
+  headers: Record<string, string>;
+}): Promise<string> {
+  const endpoint = buildAttachmentEndpoint({ account: params.account, fileId: params.fileId });
+  const response = await fetch(endpoint, {
+    method: "GET",
+    headers: params.headers,
+    redirect: "manual",
+  });
+  const location = response.headers.get("location")?.trim();
+  if (!location || ![301, 302, 303, 307, 308].includes(response.status)) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `NAVER WORKS attachment redirect failed status=${response.status} body=${body.slice(0, 300)}`,
+    );
+  }
+
+  const resolved = new URL(location, endpoint);
+  if (resolved.protocol !== "https:" || !isNaverWorksStorageHost(resolved.hostname)) {
+    throw new Error(
+      `NAVER WORKS attachment redirect used unsupported destination ${resolved.origin}`,
+    );
+  }
+  return resolved.href;
+}
+
+export async function downloadNaverWorksInboundMedia(params: {
   runtime: ReturnType<typeof getNaverWorksRuntime>;
   account: ReturnType<typeof resolveAccount>;
-  event: { mediaUrl?: string; mediaMimeType?: string; mediaFileName?: string; mediaKind?: string };
+  event: {
+    mediaUrl?: string;
+    mediaFileId?: string;
+    mediaMimeType?: string;
+    mediaFileName?: string;
+    mediaKind?: string;
+  };
   log?: {
     info?: (...args: unknown[]) => void;
     warn?: (...args: unknown[]) => void;
@@ -218,9 +288,12 @@ async function downloadInboundMedia(params: {
   };
 }): Promise<{ path?: string; mediaType?: string }> {
   const mediaUrl = params.event.mediaUrl?.trim();
-  if (!mediaUrl) {
+  const mediaFileId = params.event.mediaFileId?.trim();
+  if (!mediaUrl && !mediaFileId) {
     return {};
   }
+  const fallbackMediaType =
+    params.event.mediaMimeType ?? defaultInboundMediaType(params.event.mediaKind);
 
   const maxBytes = 20 * 1024 * 1024;
   const headers: Record<string, string> = {};
@@ -234,27 +307,54 @@ async function downloadInboundMedia(params: {
   }
 
   try {
+    let fetchUrl = mediaUrl;
+    let fetchInit =
+      mediaUrl && shouldAuthenticateDirectMediaUrl({ account: params.account, url: mediaUrl })
+        ? { headers }
+        : undefined;
+    if (!mediaUrl && mediaFileId && !params.account.botId?.trim()) {
+      params.log?.warn?.(
+        `naverworks[${params.account.accountId}]: inbound media fileId download skipped because botId is not configured`,
+      );
+      return { mediaType: fallbackMediaType };
+    }
+    if (!fetchUrl && mediaFileId) {
+      fetchUrl = await resolveNaverWorksAttachmentDownloadUrl({
+        account: params.account,
+        fileId: mediaFileId,
+        headers,
+      });
+      fetchInit = Object.keys(headers).length > 0 ? { headers } : undefined;
+    }
+    if (!fetchUrl) {
+      return { mediaType: fallbackMediaType };
+    }
+
     const fetched = await params.runtime.channel.media.fetchRemoteMedia({
-      url: mediaUrl,
+      url: fetchUrl,
       maxBytes,
-      requestInit: Object.keys(headers).length > 0 ? { headers } : undefined,
+      requestInit: fetchInit,
     });
     const saved = await params.runtime.channel.media.saveMediaBuffer(
       fetched.buffer,
-      fetched.contentType ?? params.event.mediaMimeType,
+      fetched.contentType ?? fallbackMediaType,
       "inbound",
       maxBytes,
-      fetched.fileName ?? params.event.mediaFileName ?? params.event.mediaKind,
+      fetched.fileName ??
+        params.event.mediaFileName ??
+        (mediaFileId
+          ? `naverworks-${params.event.mediaKind ?? "attachment"}`
+          : params.event.mediaKind),
     );
     return {
       path: saved.path,
-      mediaType: saved.contentType ?? fetched.contentType ?? params.event.mediaMimeType,
+      mediaType: saved.contentType ?? fetched.contentType ?? fallbackMediaType,
     };
   } catch (error) {
     params.log?.error?.(
-      `naverworks[${params.account.accountId}]: failed to download inbound media ${mediaUrl}: ${String(error)}`,
+      `naverworks[${params.account.accountId}]: failed to download inbound media ${mediaUrl ? "url" : mediaFileId ? "fileId" : "unknown"}: ${String(error)}`,
     );
-    return { mediaType: params.event.mediaMimeType };
+    return { mediaType: fallbackMediaType };
   }
 }
 
@@ -500,12 +600,12 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
               log,
             });
             log?.info?.(
-              `naverworks[${account.accountId}]: preparing inbound context bodyType=${event.mediaKind ? "media" : "text"} mediaUrl=${event.mediaUrl ? "yes" : "no"}`,
+              `naverworks[${account.accountId}]: preparing inbound context bodyType=${event.mediaKind ? "media" : "text"} mediaUrl=${event.mediaUrl ? "yes" : "no"} mediaFileId=${event.mediaFileId ? "yes" : "no"}`,
             );
             log?.info?.(
-              `naverworks[${account.accountId}]: downloading inbound media=${event.mediaUrl ? "yes" : "no"}`,
+              `naverworks[${account.accountId}]: downloading inbound media=${event.mediaUrl || event.mediaFileId ? "yes" : "no"}`,
             );
-            const downloadedMedia = await downloadInboundMedia({
+            const downloadedMedia = await downloadNaverWorksInboundMedia({
               runtime,
               account,
               event,
@@ -518,8 +618,13 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
             const mediaUrls = event.mediaUrl ? [event.mediaUrl] : undefined;
             const mediaPaths = mediaPath ? [mediaPath] : undefined;
             const mediaTypes =
-              downloadedMedia.mediaType || event.mediaMimeType
-                ? [downloadedMedia.mediaType ?? event.mediaMimeType ?? "application/octet-stream"]
+              downloadedMedia.mediaType || event.mediaMimeType || event.mediaKind
+                ? [
+                    downloadedMedia.mediaType ??
+                      event.mediaMimeType ??
+                      defaultInboundMediaType(event.mediaKind) ??
+                      "application/octet-stream",
+                  ]
                 : undefined;
 
             const locationContext = event.location ? toLocationContext(event.location) : undefined;
@@ -544,11 +649,15 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
               OriginatingTo: `naverworks:${account.accountId}`,
               MediaPath: mediaPath,
               MediaPaths: mediaPaths,
-              MediaType: downloadedMedia.mediaType ?? event.mediaMimeType,
+              MediaType:
+                downloadedMedia.mediaType ??
+                event.mediaMimeType ??
+                defaultInboundMediaType(event.mediaKind),
               MediaTypes: mediaTypes,
               MediaUrl: event.mediaUrl ?? mediaPath,
               MediaUrls: mediaUrls,
-              MediaName: event.mediaFileName,
+              MediaName: event.mediaFileName ?? event.mediaFileId,
+              MediaFileId: event.mediaFileId,
               ...(locationContext ?? {}),
             };
 
@@ -561,6 +670,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
               await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
                 ctx: msgCtx,
                 cfg: freshCfg,
+                replyOptions: { sourceReplyDeliveryMode: "automatic" },
                 dispatcherOptions: {
                   onReplyStart: async () => {
                     log?.info?.(`naverworks: reply started for ${event.userId} (${route.agentId})`);

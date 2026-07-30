@@ -157,6 +157,9 @@ function inferMediaKind(params: {
     if (contentType.includes("audio") || contentType.includes("voice")) {
       return "audio";
     }
+    if (contentType.includes("video")) {
+      return "file";
+    }
     if (contentType !== "text") {
       return "file";
     }
@@ -176,6 +179,9 @@ function inferMediaKind(params: {
   }
   if (fileName?.match(/\.(mp3|m4a|wav|ogg|opus|aac|flac|amr)$/)) {
     return "audio";
+  }
+  if (fileName?.match(/\.(mp4|mov|m4v|webm|avi|mkv)$/)) {
+    return "file";
   }
   return undefined;
 }
@@ -341,6 +347,26 @@ export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent 
   const attachment = asObject(content.attachment);
   const media = asObject(content.media);
 
+  const mediaFileId = pickFirstString([
+    content.fileId,
+    content.resourceId,
+    content.id,
+    resource.fileId,
+    resource.resourceId,
+    resource.id,
+    file.fileId,
+    file.resourceId,
+    file.id,
+    attachment.fileId,
+    attachment.resourceId,
+    attachment.id,
+    media.fileId,
+    media.resourceId,
+    media.id,
+    root.fileId,
+    root.resourceId,
+  ]);
+
   const mediaUrl = pickFirstString([
     content.resourceUrl,
     content.mediaUrl,
@@ -393,7 +419,7 @@ export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent 
       root,
     });
 
-  if (!userId || (!synthesizedText && !mediaUrl && !location)) {
+  if (!userId || (!synthesizedText && !mediaUrl && !mediaFileId && !location)) {
     return null;
   }
 
@@ -429,6 +455,7 @@ export function parseNaverWorksInbound(rawBody: string): NaverWorksInboundEvent 
     text: synthesizedText,
     location,
     mediaUrl,
+    mediaFileId,
     mediaKind,
     mediaMimeType,
     mediaFileName,
