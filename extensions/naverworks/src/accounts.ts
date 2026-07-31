@@ -1,11 +1,26 @@
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/routing";
-import type { NaverWorksAccount, NaverWorksStickerRef } from "./types.js";
+import type { NaverWorksAccount } from "./types.js";
 
-const DEFAULT_STATUS_STICKERS: Required<NonNullable<NaverWorksAccount["statusStickers"]>> = {
+const DEFAULT_PROGRESS_MESSAGES: Required<NonNullable<NaverWorksAccount["progressMessages"]>> = {
   enabled: true,
-  received: { packageId: "789", stickerId: "10855" },
-  processing: { packageId: "534", stickerId: "2429" },
-  failed: { packageId: "1", stickerId: "3" },
+  text: "생각 중입니다...",
+  texts: [
+    "생각 중입니다...",
+    "답변을 준비하고 있어요...",
+    "잠시만요, 확인 중입니다...",
+    "자료를 살펴보는 중입니다...",
+    "정리해서 답변드릴게요...",
+    "내용을 확인하고 있어요...",
+    "답변 방향을 잡고 있어요...",
+    "필요한 내용을 찾는 중입니다...",
+  ],
+  intervalMs: 60_000,
+  emojis: ["🤔", "🔎", "🧠", "✍️", "💬", "✨", "📚", "🕒"],
+};
+
+const DEFAULT_DEBUG_SUMMARY: Required<NonNullable<NaverWorksAccount["debugSummary"]>> = {
+  enabled: false,
+  includeCosts: true,
 };
 
 function asString(value: unknown): string | undefined {
@@ -29,24 +44,24 @@ function asThinkingLevel(value: unknown): "low" | "medium" | "high" | undefined 
   return undefined;
 }
 
-function asStickerRef(value: unknown): NaverWorksStickerRef | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const packageId = asString(record.packageId);
-  const stickerId = asString(record.stickerId);
-  if (!packageId || !stickerId) {
-    return undefined;
-  }
-  return { packageId, stickerId };
-}
-
 function normalizePrivateKey(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
   }
   return value.replace(/\\n/g, "\n");
+}
+
+function asPositiveInteger(value: unknown): number | undefined {
+  const candidate =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+  if (!Number.isSafeInteger(candidate) || candidate <= 0) {
+    return undefined;
+  }
+  return candidate;
 }
 
 export function listAccountIds(cfg: Record<string, unknown>): string[] {
@@ -66,8 +81,26 @@ export function resolveAccount(
   const accountCfg = (accounts[resolvedId] ?? {}) as Record<string, unknown>;
   const sectionAutoThinking = (section.autoThinking ?? {}) as Record<string, unknown>;
   const accountAutoThinking = (accountCfg.autoThinking ?? {}) as Record<string, unknown>;
+  const sectionProgressMessages = (section.progressMessages ?? {}) as Record<string, unknown>;
+  const accountProgressMessages = (accountCfg.progressMessages ?? {}) as Record<string, unknown>;
   const sectionStatusStickers = (section.statusStickers ?? {}) as Record<string, unknown>;
   const accountStatusStickers = (accountCfg.statusStickers ?? {}) as Record<string, unknown>;
+  const sectionDebugSummary = (section.debugSummary ?? {}) as Record<string, unknown>;
+  const accountDebugSummary = (accountCfg.debugSummary ?? {}) as Record<string, unknown>;
+  const progressMessageEmojis = [
+    ...asStringList(sectionProgressMessages.emojis),
+    ...asStringList(accountProgressMessages.emojis),
+  ];
+  const progressMessageTexts = [
+    ...asStringList(sectionProgressMessages.texts),
+    ...asStringList(accountProgressMessages.texts),
+  ];
+  const accountProgressMessageText = asString(accountProgressMessages.text);
+  const sectionProgressMessageText = asString(sectionProgressMessages.text);
+  const progressMessageText =
+    accountProgressMessageText ?? sectionProgressMessageText ?? DEFAULT_PROGRESS_MESSAGES.text;
+  const progressMessageTextConfigured =
+    accountProgressMessageText !== undefined || sectionProgressMessageText !== undefined;
 
   const dmPolicy =
     (asString(accountCfg.dmPolicy) as NaverWorksAccount["dmPolicy"] | undefined) ??
@@ -136,23 +169,36 @@ export function resolveAccount(
         ...asStringList(accountAutoThinking.highKeywords),
       ],
     },
-    statusStickers: {
+    progressMessages: {
       enabled:
+        (accountProgressMessages.enabled as boolean | undefined) ??
+        (sectionProgressMessages.enabled as boolean | undefined) ??
         (accountStatusStickers.enabled as boolean | undefined) ??
         (sectionStatusStickers.enabled as boolean | undefined) ??
-        true,
-      received:
-        asStickerRef(accountStatusStickers.received) ??
-        asStickerRef(sectionStatusStickers.received) ??
-        DEFAULT_STATUS_STICKERS.received,
-      processing:
-        asStickerRef(accountStatusStickers.processing) ??
-        asStickerRef(sectionStatusStickers.processing) ??
-        DEFAULT_STATUS_STICKERS.processing,
-      failed:
-        asStickerRef(accountStatusStickers.failed) ??
-        asStickerRef(sectionStatusStickers.failed) ??
-        DEFAULT_STATUS_STICKERS.failed,
+        DEFAULT_PROGRESS_MESSAGES.enabled,
+      text: progressMessageText,
+      texts:
+        progressMessageTexts.length > 0
+          ? progressMessageTexts
+          : progressMessageTextConfigured
+            ? [progressMessageText]
+            : DEFAULT_PROGRESS_MESSAGES.texts,
+      intervalMs:
+        asPositiveInteger(accountProgressMessages.intervalMs) ??
+        asPositiveInteger(sectionProgressMessages.intervalMs) ??
+        DEFAULT_PROGRESS_MESSAGES.intervalMs,
+      emojis:
+        progressMessageEmojis.length > 0 ? progressMessageEmojis : DEFAULT_PROGRESS_MESSAGES.emojis,
+    },
+    debugSummary: {
+      enabled:
+        (accountDebugSummary.enabled as boolean | undefined) ??
+        (sectionDebugSummary.enabled as boolean | undefined) ??
+        DEFAULT_DEBUG_SUMMARY.enabled,
+      includeCosts:
+        (accountDebugSummary.includeCosts as boolean | undefined) ??
+        (sectionDebugSummary.includeCosts as boolean | undefined) ??
+        DEFAULT_DEBUG_SUMMARY.includeCosts,
     },
   };
 }

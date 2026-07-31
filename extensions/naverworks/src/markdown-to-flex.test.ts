@@ -93,7 +93,42 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     const serialized = JSON.stringify(payload);
     expect(serialized).toContain("Table");
     expect(serialized).toContain("Code (ts)");
-    expect(serialized).toContain("Key: mode | Value: auto-flex");
+    expect(serialized).toContain('"text":"Key"');
+    expect(serialized).toContain('"text":"mode"');
+    expect(serialized).toContain('"text":"Value"');
+    expect(serialized).toContain('"text":"auto-flex"');
+    expect(serialized).toContain('"layout":"horizontal"');
+    expect(serialized).toContain('"type":"separator"');
+  });
+
+  it("keeps links clickable in compact table cells", () => {
+    const payload = markdownToNaverWorksFlexTemplate(
+      ["| Site | URL |", "| --- | --- |", "| docs | docs.openclaw.ai |"].join("\n"),
+    );
+
+    expect(payload).toBeTruthy();
+    const serialized = JSON.stringify(payload);
+    expect(serialized).toContain('"layout":"horizontal"');
+    expect(serialized).toContain('"uri":"https://docs.openclaw.ai/"');
+  });
+
+  it("expands long table rows into vertical key-value rows", () => {
+    const payload = markdownToNaverWorksFlexTemplate(
+      [
+        "| Key | Value |",
+        "| --- | --- |",
+        "| summary | this is a deliberately long table value that should exceed the compact byte limit and expand into mobile friendly rows |",
+        "| status | done |",
+      ].join("\n"),
+    );
+
+    expect(payload).toBeTruthy();
+    const serialized = JSON.stringify(payload);
+    expect(serialized).toContain('"text":"summary"');
+    expect(serialized).toContain('"text":"Value"');
+    expect(serialized).toContain("mobile friendly rows");
+    expect(serialized).toContain('"layout":"vertical"');
+    expect(serialized).toContain('"type":"separator"');
   });
 
   it("limits altText to 400 characters for NAVER WORKS flex payloads", () => {

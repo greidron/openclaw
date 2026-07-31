@@ -3,6 +3,7 @@ import { resolveAccount } from "./accounts.js";
 import {
   createNaverWorksPlugin,
   downloadNaverWorksInboundMedia,
+  parseNaverWorksDebugCommand,
   resolveAutoThinkingDirective,
   resolveNaverWorksAttachmentDownloadUrl,
 } from "./channel.js";
@@ -28,6 +29,26 @@ describe("naverworks channel plugin", () => {
     );
 
     expect(plugin.config.isConfigured?.(account as never, {} as never)).toBe(true);
+  });
+
+  it("enables block streaming with bounded coalescing", () => {
+    const plugin = createNaverWorksPlugin();
+
+    expect(plugin.capabilities.blockStreaming).toBe(true);
+    expect(plugin.streaming?.blockStreamingCoalesceDefaults).toEqual({
+      minChars: 1500,
+      idleMs: 1000,
+    });
+  });
+
+  it("parses NAVER WORKS debug control commands before agent dispatch", () => {
+    expect(parseNaverWorksDebugCommand("/debug")).toEqual({ kind: "status" });
+    expect(parseNaverWorksDebugCommand("/debug status")).toEqual({ kind: "status" });
+    expect(parseNaverWorksDebugCommand("/debug on")).toEqual({ kind: "on" });
+    expect(parseNaverWorksDebugCommand("/debug off")).toEqual({ kind: "off" });
+    expect(parseNaverWorksDebugCommand("/debug once")).toEqual({ kind: "once" });
+    expect(parseNaverWorksDebugCommand("debug on")).toBeUndefined();
+    expect(parseNaverWorksDebugCommand("/debug later")).toEqual({ kind: "status" });
   });
 
   it("marks account unconfigured when outbound auth is missing", async () => {

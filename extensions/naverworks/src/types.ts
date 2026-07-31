@@ -30,11 +30,16 @@ export type NaverWorksAccount = {
     lowKeywords: string[];
     highKeywords: string[];
   };
-  statusStickers?: {
+  progressMessages?: {
     enabled: boolean;
-    received?: NaverWorksStickerRef;
-    processing?: NaverWorksStickerRef;
-    failed?: NaverWorksStickerRef;
+    text: string;
+    texts: string[];
+    intervalMs: number;
+    emojis: string[];
+  };
+  debugSummary?: {
+    enabled: boolean;
+    includeCosts: boolean;
   };
 };
 

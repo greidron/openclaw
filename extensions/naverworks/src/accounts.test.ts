@@ -142,20 +142,23 @@ describe("resolveAccount", () => {
     expect(account.markdownMode).toBe("auto-flex");
   });
 
-  it("merges statusStickers with account override", () => {
+  it("merges progressMessages with account override", () => {
     const account = resolveAccount(
       {
         channels: {
           naverworks: {
-            statusStickers: {
+            progressMessages: {
               enabled: true,
-              received: { packageId: "1", stickerId: "1" },
-              failed: { packageId: "1", stickerId: "3" },
+              text: "처리 중입니다...",
+              texts: ["생각 중입니다..."],
+              emojis: ["🕒"],
             },
             accounts: {
               default: {
-                statusStickers: {
-                  processing: { packageId: "1", stickerId: "2" },
+                progressMessages: {
+                  intervalMs: 30_000,
+                  texts: ["자료를 살펴보는 중입니다..."],
+                  emojis: ["🚀"],
                 },
               },
             },
@@ -165,18 +168,21 @@ describe("resolveAccount", () => {
       "default",
     );
 
-    expect(account.statusStickers?.enabled).toBe(true);
-    expect(account.statusStickers?.received).toEqual({ packageId: "1", stickerId: "1" });
-    expect(account.statusStickers?.processing).toEqual({ packageId: "1", stickerId: "2" });
-    expect(account.statusStickers?.failed).toEqual({ packageId: "1", stickerId: "3" });
+    expect(account.progressMessages).toEqual({
+      enabled: true,
+      text: "처리 중입니다...",
+      texts: ["생각 중입니다...", "자료를 살펴보는 중입니다..."],
+      intervalMs: 30_000,
+      emojis: ["🕒", "🚀"],
+    });
   });
 
-  it("applies contextual default status stickers when enabled without explicit refs", () => {
+  it("applies contextual default progress messages when enabled without explicit text", () => {
     const account = resolveAccount(
       {
         channels: {
           naverworks: {
-            statusStickers: {
+            progressMessages: {
               enabled: true,
             },
           },
@@ -185,23 +191,121 @@ describe("resolveAccount", () => {
       "default",
     );
 
-    expect(account.statusStickers?.received).toEqual({ packageId: "789", stickerId: "10855" });
-    expect(account.statusStickers?.processing).toEqual({
-      packageId: "534",
-      stickerId: "2429",
+    expect(account.progressMessages).toEqual({
+      enabled: true,
+      text: "생각 중입니다...",
+      texts: [
+        "생각 중입니다...",
+        "답변을 준비하고 있어요...",
+        "잠시만요, 확인 중입니다...",
+        "자료를 살펴보는 중입니다...",
+        "정리해서 답변드릴게요...",
+        "내용을 확인하고 있어요...",
+        "답변 방향을 잡고 있어요...",
+        "필요한 내용을 찾는 중입니다...",
+      ],
+      intervalMs: 60_000,
+      emojis: ["🤔", "🔎", "🧠", "✍️", "💬", "✨", "📚", "🕒"],
     });
-    expect(account.statusStickers?.failed).toEqual({ packageId: "1", stickerId: "3" });
   });
 
-  it("enables status stickers by default", () => {
+  it("enables progress messages by default", () => {
     const account = resolveAccount({ channels: { naverworks: {} } }, "default");
 
-    expect(account.statusStickers?.enabled).toBe(true);
-    expect(account.statusStickers?.received).toEqual({ packageId: "789", stickerId: "10855" });
-    expect(account.statusStickers?.processing).toEqual({
-      packageId: "534",
-      stickerId: "2429",
+    expect(account.progressMessages).toEqual({
+      enabled: true,
+      text: "생각 중입니다...",
+      texts: [
+        "생각 중입니다...",
+        "답변을 준비하고 있어요...",
+        "잠시만요, 확인 중입니다...",
+        "자료를 살펴보는 중입니다...",
+        "정리해서 답변드릴게요...",
+        "내용을 확인하고 있어요...",
+        "답변 방향을 잡고 있어요...",
+        "필요한 내용을 찾는 중입니다...",
+      ],
+      intervalMs: 60_000,
+      emojis: ["🤔", "🔎", "🧠", "✍️", "💬", "✨", "📚", "🕒"],
     });
-    expect(account.statusStickers?.failed).toEqual({ packageId: "1", stickerId: "3" });
+  });
+
+  it("keeps legacy single progress text as the only candidate when texts are omitted", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            progressMessages: {
+              text: "확인 중입니다...",
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.progressMessages?.texts).toEqual(["확인 중입니다..."]);
+  });
+
+  it("keeps explicit default progress text as a single candidate when texts are omitted", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            progressMessages: {
+              text: "생각 중입니다...",
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.progressMessages?.texts).toEqual(["생각 중입니다..."]);
+  });
+
+  it("preserves legacy statusStickers opt-out for progress messages", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            statusStickers: {
+              enabled: false,
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.progressMessages?.enabled).toBe(false);
+  });
+
+  it("resolves debug summary settings with account override", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            debugSummary: {
+              enabled: true,
+              includeCosts: false,
+            },
+            accounts: {
+              default: {
+                debugSummary: {
+                  includeCosts: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.debugSummary).toEqual({
+      enabled: true,
+      includeCosts: true,
+    });
   });
 });

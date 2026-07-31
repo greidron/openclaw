@@ -1,6 +1,14 @@
 const MARKDOWN_TABLE_REGEX = /^\|(.+)\|[\r\n]+\|[-:\s|]+\|[\r\n]+((?:\|.+\|[\r\n]*)+)/gm;
 const MARKDOWN_CODE_BLOCK_REGEX = /```(\w*)\n([\s\S]*?)```/g;
 
+type ParsedMarkdownTable = {
+  headers: string[];
+  rows: string[][];
+  extraCount: number;
+};
+
+const COMPACT_TABLE_ROW_MAX_BYTES = 80;
+
 export type NaverWorksFlexBoxLayout = "horizontal" | "vertical" | "baseline";
 
 export type NaverWorksFlexComponent =
@@ -37,6 +45,7 @@ export type NaverWorksFlexComponent =
       contents: NaverWorksFlexComponent[];
       margin?: "none" | "sm" | "md";
       spacing?: "none" | "sm";
+      flex?: number;
     };
 
 export type NaverWorksFlexBubble = {
@@ -86,31 +95,31 @@ function parseTableRow(row: string): string[] {
     .filter((cell, index, arr) => !((index === 0 || index === arr.length - 1) && cell === ""));
 }
 
-function extractTables(text: string): { tables: string[]; textWithoutTables: string } {
+function extractTables(text: string): { tables: ParsedMarkdownTable[]; textWithoutTables: string } {
   MARKDOWN_TABLE_REGEX.lastIndex = 0;
-  const matches: { fullMatch: string; summary: string }[] = [];
+  const matches: { fullMatch: string; table: ParsedMarkdownTable }[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = MARKDOWN_TABLE_REGEX.exec(text)) !== null) {
     const headers = parseTableRow(match[1] ?? "");
-    const rows = (match[2] ?? "")
+    const allRows = (match[2] ?? "")
       .trim()
       .split(/[\r\n]+/)
       .filter((line) => line.trim())
       .map(parseTableRow);
 
-    if (headers.length === 0 || rows.length === 0) {
+    if (headers.length === 0 || allRows.length === 0) {
       continue;
     }
 
-    const previewRows = rows
-      .slice(0, 3)
-      .map((row) => headers.map((header, index) => `${header}: ${row[index] ?? "-"}`).join(" | "));
-    const extraCount = rows.length - previewRows.length;
-    const suffix = extraCount > 0 ? `\n... and ${extraCount} more row(s)` : "";
+    const rows = allRows.slice(0, 3);
     matches.push({
       fullMatch: match[0],
-      summary: `Table\n${previewRows.join("\n")}${suffix}`,
+      table: {
+        headers,
+        rows,
+        extraCount: allRows.length - rows.length,
+      },
     });
   }
 
@@ -120,7 +129,7 @@ function extractTables(text: string): { tables: string[]; textWithoutTables: str
   }
 
   return {
-    tables: matches.map((entry) => entry.summary),
+    tables: matches.map((entry) => entry.table),
     textWithoutTables,
   };
 }
@@ -134,6 +143,20 @@ function normalizeInlineMarkdown(text: string): string {
     .replace(/^\s*[-*+]\s+/gm, "• ")
     .replace(/^\s*#{1,6}\s+/gm, "")
     .trim();
+}
+
+function getUtf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+function getRenderedTableRowByteLength(row: string[]): number {
+  return getUtf8ByteLength(row.map((cell) => cell.trim()).join(" | "));
+}
+
+function shouldRenderCompactTable(table: ParsedMarkdownTable): boolean {
+  return [table.headers, ...table.rows].every(
+    (row) => getRenderedTableRowByteLength(row) < COMPACT_TABLE_ROW_MAX_BYTES,
+  );
 }
 
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:)\]}]+$/;
@@ -250,6 +273,125 @@ export function createTextLineComponents(
   ];
 }
 
+function createTableRowComponents(
+  table: ParsedMarkdownTable,
+  options: { textColor: string; sectionTitleColor: string },
+): NaverWorksFlexComponent[] {
+  if (shouldRenderCompactTable(table)) {
+    return createCompactTableRowComponents(table, options);
+  }
+  return createExpandedTableRowComponents(table, options);
+}
+
+function createCompactTableRowComponents(
+  table: ParsedMarkdownTable,
+  options: { textColor: string; sectionTitleColor: string },
+): NaverWorksFlexComponent[] {
+  const contents: NaverWorksFlexComponent[] = [
+    {
+      type: "box",
+      layout: "horizontal",
+      margin: "sm",
+      spacing: "sm",
+      contents: table.headers.map((header, index) => ({
+        ...createTextComponent(header.trim() || `Column ${index + 1}`, {
+          bold: true,
+          color: options.sectionTitleColor,
+          size: "sm",
+        }),
+        flex: 1,
+      })),
+    },
+  ];
+
+  for (const [rowIndex, row] of table.rows.entries()) {
+    contents.push({ type: "separator", margin: "sm" });
+    contents.push({
+      type: "box",
+      layout: "horizontal",
+      margin: "sm",
+      spacing: "sm",
+      contents: table.headers.map((_header, index) => {
+        const cellComponents = createTextLineComponents(row[index]?.trim() || "-", {
+          color: options.textColor,
+          size: "sm",
+        });
+        if (cellComponents.length === 1) {
+          return { ...cellComponents[0], flex: 1 };
+        }
+        return {
+          type: "box" as const,
+          layout: "vertical" as const,
+          contents: cellComponents,
+          flex: 1,
+        };
+      }),
+    });
+  }
+
+  if (table.extraCount > 0) {
+    contents.push(
+      ...createTextLineComponents(`... and ${table.extraCount} more row(s)`, {
+        margin: "sm",
+        color: options.textColor,
+        size: "sm",
+      }),
+    );
+  }
+  return contents;
+}
+
+function createExpandedTableRowComponents(
+  table: ParsedMarkdownTable,
+  options: { textColor: string; sectionTitleColor: string },
+): NaverWorksFlexComponent[] {
+  const contents: NaverWorksFlexComponent[] = [];
+  for (const [rowIndex, row] of table.rows.entries()) {
+    if (rowIndex > 0) {
+      contents.push({ type: "separator", margin: "md" });
+    }
+    const rowContents: NaverWorksFlexComponent[] = [];
+    for (const [index, header] of table.headers.entries()) {
+      const label = header.trim() || `Column ${index + 1}`;
+      const value = row[index]?.trim() || "-";
+      rowContents.push({
+        type: "box",
+        layout: "vertical",
+        margin: rowContents.length === 0 ? "none" : "sm",
+        contents: [
+          ...createTextLineComponents(label, {
+            bold: true,
+            color: options.sectionTitleColor,
+            size: "sm",
+          }),
+          ...createTextLineComponents(value, {
+            margin: "none",
+            color: options.textColor,
+            size: "md",
+          }),
+        ],
+      });
+    }
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: rowIndex === 0 ? "sm" : "md",
+      spacing: "sm",
+      contents: rowContents,
+    });
+  }
+  if (table.extraCount > 0) {
+    contents.push(
+      ...createTextLineComponents(`... and ${table.extraCount} more row(s)`, {
+        margin: "sm",
+        color: options.textColor,
+        size: "sm",
+      }),
+    );
+  }
+  return contents;
+}
+
 function buildAltText(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) {
@@ -299,20 +441,15 @@ export function markdownToNaverWorksFlexTemplate(
     if (contents.length > 0) {
       contents.push({ type: "separator", margin: "md" });
     }
-    const tableLines = table.split("\n").filter(Boolean);
     contents.push(
-      ...createTextLineComponents(tableLines[0] ?? "Table", {
+      ...createTextLineComponents("Table", {
         bold: true,
         margin: "sm",
         color: sectionTitleColor,
         size: "md",
       }),
     );
-    for (const line of tableLines.slice(1)) {
-      contents.push(
-        ...createTextLineComponents(line, { margin: "sm", color: textColor, size: "md" }),
-      );
-    }
+    contents.push(...createTableRowComponents(table, { textColor, sectionTitleColor }));
   }
 
   for (const codeBlock of codeBlocks) {

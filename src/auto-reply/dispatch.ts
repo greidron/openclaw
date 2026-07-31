@@ -509,6 +509,14 @@ function finalizeDispatchResult(
   };
 }
 
+function attachReplyUsageState(
+  result: DispatchFromConfigResult,
+  runState: ReplyPayloadRunState,
+): DispatchFromConfigResult {
+  const replyUsage = consumeReplyUsageState(runState.runId);
+  return replyUsage ? { ...result, replyUsage } : result;
+}
+
 /** Dispatches one finalized inbound message through reply resolution and queued delivery. */
 export async function dispatchInboundMessage(params: {
   ctx: MsgContext | FinalizedMsgContext;
@@ -659,7 +667,7 @@ export async function dispatchInboundMessageWithBufferedDispatcher(params: {
     : replyOptions.onTypingController;
   markReplyPayloadSendingBeforeDeliverInstalled(dispatcher, replyPayloadBeforeDeliver);
   try {
-    return await dispatchInboundMessage({
+    const result = await dispatchInboundMessage({
       ctx: finalized,
       cfg: params.cfg,
       dispatcher,
@@ -678,6 +686,7 @@ export async function dispatchInboundMessageWithBufferedDispatcher(params: {
       replyPayloadRunState,
       onSessionMetadataChanges: params.onSessionMetadataChanges,
     });
+    return attachReplyUsageState(result, replyPayloadRunState);
   } finally {
     try {
       const settledResult = await params.dispatcherOptions.onSettled?.();
@@ -734,7 +743,7 @@ export async function dispatchInboundMessageWithDispatcher(params: {
     silentReplyContext: params.dispatcherOptions.silentReplyContext ?? silentReplyContext,
   });
   markReplyPayloadSendingBeforeDeliverInstalled(dispatcher, replyPayloadBeforeDeliver);
-  return await dispatchInboundMessage({
+  const result = await dispatchInboundMessage({
     ctx: params.ctx,
     cfg: params.cfg,
     dispatcher,
@@ -743,4 +752,5 @@ export async function dispatchInboundMessageWithDispatcher(params: {
     replyOptions: params.replyOptions,
     replyPayloadRunState,
   });
+  return attachReplyUsageState(result, replyPayloadRunState);
 }

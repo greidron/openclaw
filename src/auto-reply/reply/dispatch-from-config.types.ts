@@ -1,5 +1,6 @@
 // Shared type contracts for dispatch-from-config runtime execution.
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import type { SourceReplyDeliveryMode } from "../get-reply-options.types.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import type { FormatAbortReplyText, TryFastAbortFromMessage } from "./abort.runtime-types.js";
@@ -17,6 +18,7 @@ export type DispatchFromConfigResult = {
   noVisibleReplyFallbackEligible?: boolean;
   beforeAgentRunBlocked?: boolean;
   sessionMetadataChanges?: CommandSessionMetadataChange[];
+  replyUsage?: PluginHookReplyUsageState;
 };
 
 export type DispatchFromConfigParams = {
