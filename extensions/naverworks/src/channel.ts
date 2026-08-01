@@ -1,5 +1,6 @@
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
 import { toLocationContext } from "openclaw/plugin-sdk/channel-inbound";
+import { hasVisibleInboundReplyDispatch } from "openclaw/plugin-sdk/channel-inbound";
 import {
   buildChannelConfigSchema,
   setAccountEnabledInConfigSection,
@@ -16,6 +17,10 @@ import type { NaverWorksAccount } from "./types.js";
 import { createNaverWorksWebhookHandler } from "./webhook-handler.js";
 
 const CHANNEL_ID = "naverworks";
+const PROGRESS_EVENT_MIN_INTERVAL_MS = 1_000;
+const PROGRESS_EVENT_MAX_TEXT_CHARS = 700;
+const LONG_RUNNING_PROGRESS_MESSAGE =
+  "평소보다 응답이 오래 걸립니다. 결과가 오면 알려드리겠습니다.";
 
 const NaverWorksConfigSchema = buildChannelConfigSchema(
   z
@@ -52,6 +57,21 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
           texts: z.array(z.string()).optional(),
           intervalMs: z.number().int().positive().optional(),
           emojis: z.array(z.string()).optional(),
+        })
+        .optional(),
+      runTimeoutSeconds: z.number().int().nonnegative().optional(),
+      progressEvents: z
+        .object({
+          blockReply: z.boolean().optional(),
+          partialReply: z.boolean().optional(),
+          reasoning: z.boolean().optional(),
+          narration: z.boolean().optional(),
+          item: z.boolean().optional(),
+          toolStart: z.boolean().optional(),
+          toolResult: z.boolean().optional(),
+          commandOutput: z.boolean().optional(),
+          planUpdate: z.boolean().optional(),
+          approvalEvent: z.boolean().optional(),
         })
         .optional(),
       statusStickers: z
@@ -254,6 +274,164 @@ function selectProgressText(account: ReturnType<typeof resolveAccount>): string 
   return texts[index] ?? account.progressMessages?.text.trim() ?? "";
 }
 
+function normalizeProgressEventText(text: unknown): string | undefined {
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.length > PROGRESS_EVENT_MAX_TEXT_CHARS
+    ? `${trimmed.slice(0, PROGRESS_EVENT_MAX_TEXT_CHARS - 1).trimEnd()}…`
+    : trimmed;
+}
+
+function resolveProgressItemEventText(payload: {
+  kind?: string;
+  progressText?: string;
+  summary?: string;
+  title?: string;
+  name?: string;
+  status?: string;
+}): string | undefined {
+  const text =
+    normalizeProgressEventText(payload.progressText) ??
+    normalizeProgressEventText(payload.summary) ??
+    normalizeProgressEventText(payload.title) ??
+    normalizeProgressEventText(payload.name);
+  if (!text) {
+    return undefined;
+  }
+  if (payload.kind === "preamble") {
+    return `💬 ${text}`;
+  }
+  const status = normalizeProgressEventText(payload.status);
+  return status ? `🔄 ${text} (${status})` : `🔄 ${text}`;
+}
+
+function resolveProgressToolStartText(payload: {
+  name?: string;
+  phase?: string;
+  detailMode?: string;
+}): string | undefined {
+  const name = normalizeProgressEventText(payload.name) ?? "tool";
+  const phase = normalizeProgressEventText(payload.phase);
+  return phase ? `🛠️ ${name} 실행 중 (${phase})` : `🛠️ ${name} 실행 중`;
+}
+
+function resolveProgressToolResultText(payload: {
+  text?: string;
+  body?: string;
+}): string | undefined {
+  const text = normalizeProgressEventText(payload.text ?? payload.body);
+  return text ? `✅ 도구 결과: ${text}` : undefined;
+}
+
+function resolveProgressCommandOutputText(payload: {
+  text?: string;
+  output?: string;
+}): string | undefined {
+  const text = normalizeProgressEventText(payload.text ?? payload.output);
+  return text ? `💻 명령 출력: ${text}` : undefined;
+}
+
+function resolveProgressPlanUpdateText(payload: {
+  steps?: Array<{ step?: string; status?: string }>;
+  text?: string;
+  summary?: string;
+  explanation?: string;
+}): string | undefined {
+  const text = normalizeProgressEventText(payload.text ?? payload.summary ?? payload.explanation);
+  if (text) {
+    return `🧭 계획 업데이트: ${text}`;
+  }
+  const activeStep =
+    payload.steps?.find((step) => step.status === "in_progress") ?? payload.steps?.[0];
+  const stepText = normalizeProgressEventText(activeStep?.step);
+  return stepText ? `🧭 진행 중: ${stepText}` : undefined;
+}
+
+function resolveProgressApprovalEventText(payload: {
+  status?: string;
+  title?: string;
+  summary?: string;
+  text?: string;
+}): string | undefined {
+  const text = normalizeProgressEventText(payload.title ?? payload.summary ?? payload.text);
+  if (!text) {
+    return undefined;
+  }
+  const status = normalizeProgressEventText(payload.status);
+  return status ? `🔐 승인 ${status}: ${text}` : `🔐 승인 요청: ${text}`;
+}
+
+export function resolveNaverWorksProgressEventTextForTest(params: {
+  kind: "tool-start" | "tool-result" | "command-output" | "plan-update" | "approval-event";
+  payload: Record<string, unknown>;
+}): string | undefined {
+  if (params.kind === "tool-start") {
+    return resolveProgressToolStartText(
+      params.payload as {
+        name?: string;
+        phase?: string;
+        detailMode?: string;
+      },
+    );
+  }
+  if (params.kind === "tool-result") {
+    return resolveProgressToolResultText(params.payload as { text?: string; body?: string });
+  }
+  if (params.kind === "command-output") {
+    return resolveProgressCommandOutputText(params.payload as { text?: string; output?: string });
+  }
+  if (params.kind === "plan-update") {
+    return resolveProgressPlanUpdateText(
+      params.payload as {
+        steps?: Array<{ step?: string; status?: string }>;
+        text?: string;
+        summary?: string;
+      },
+    );
+  }
+  return resolveProgressApprovalEventText(
+    params.payload as {
+      status?: string;
+      title?: string;
+      summary?: string;
+      text?: string;
+    },
+  );
+}
+
+export function resolveNaverWorksPartialReplyProgressText(
+  payload: { text?: string; delta?: string },
+  previousText: string,
+): { text?: string; nextText: string } {
+  const nextText = typeof payload.text === "string" ? payload.text : "";
+  const nextDelta = typeof payload.delta === "string" ? payload.delta : "";
+  if (!nextText && !nextDelta) {
+    return { nextText: previousText };
+  }
+
+  if (nextText && previousText && nextText.startsWith(previousText)) {
+    return {
+      text: normalizeProgressEventText(nextText.slice(previousText.length)),
+      nextText,
+    };
+  }
+  if (nextDelta) {
+    return {
+      text: normalizeProgressEventText(nextDelta),
+      nextText: previousText + nextDelta,
+    };
+  }
+  return {
+    text: normalizeProgressEventText(nextText),
+    nextText,
+  };
+}
+
 type NaverWorksReplyUsageSummary = {
   provider?: string;
   model?: string;
@@ -353,6 +531,7 @@ function formatNaverWorksDebugSummary(params: {
 async function sendProgressMessage(params: {
   account: ReturnType<typeof resolveAccount>;
   userId: string;
+  message?: string;
   log?: {
     info?: (...args: unknown[]) => void;
     warn?: (...args: unknown[]) => void;
@@ -366,11 +545,8 @@ async function sendProgressMessage(params: {
     );
     return;
   }
-  const text = selectProgressText(params.account).trim();
-  if (!text) {
-    return;
-  }
-  const message = `${selectProgressEmoji(params.account)} ${text}`;
+  const message = params.message ?? resolveNaverWorksHeartbeatProgressTextForTest(params.account);
+  if (!message) return;
 
   params.log?.info?.(
     `naverworks[${params.account.accountId}]: sending progress message to ${params.userId}`,
@@ -398,9 +574,24 @@ async function sendProgressMessage(params: {
   }
 }
 
+export function resolveNaverWorksHeartbeatProgressTextForTest(
+  account: ReturnType<typeof resolveAccount>,
+  placeholderSequence = 1,
+): string {
+  if (placeholderSequence === 3) {
+    return `${selectProgressEmoji(account)} ${LONG_RUNNING_PROGRESS_MESSAGE}`;
+  }
+  if (placeholderSequence > 3) {
+    return "";
+  }
+  const text = selectProgressText(account).trim();
+  return text ? `${selectProgressEmoji(account)} ${text}` : "";
+}
+
 function startProgressMessageHeartbeat(params: {
   account: ReturnType<typeof resolveAccount>;
   userId: string;
+  shouldSkip?: () => boolean;
   log?: {
     info?: (...args: unknown[]) => void;
     warn?: (...args: unknown[]) => void;
@@ -412,15 +603,35 @@ function startProgressMessageHeartbeat(params: {
     `naverworks[${params.account.accountId}]: starting progress message heartbeat for ${params.userId} intervalMs=${intervalMs}`,
   );
   let stopped = false;
+  let placeholderSequence = 0;
   let pendingSend = Promise.resolve();
   const enqueueProgressMessage = () => {
     pendingSend = pendingSend.then(() => {
       if (stopped) {
         return;
       }
+      if (params.shouldSkip?.() === true) {
+        placeholderSequence = 0;
+        params.log?.info?.(
+          `naverworks[${params.account.accountId}]: progress message skipped for ${params.userId} (recent visible reply delivery)`,
+        );
+        return;
+      }
+      placeholderSequence += 1;
+      const message = resolveNaverWorksHeartbeatProgressTextForTest(
+        params.account,
+        placeholderSequence,
+      );
+      if (!message) {
+        params.log?.info?.(
+          `naverworks[${params.account.accountId}]: progress message skipped for ${params.userId} (long-running notice already sent)`,
+        );
+        return;
+      }
       return sendProgressMessage({
         account: params.account,
         userId: params.userId,
+        message,
         log: params.log,
       });
     });
@@ -930,12 +1141,191 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
             );
             let stopProgressMessageHeartbeat = async () => {};
             let progressMessageHeartbeatStarted = false;
+            let lastVisibleReplyDeliveryAt = 0;
+            let lastProgressEventText = "";
+            let lastProgressEventSentAt = 0;
+            const sentBlockReplyTexts = new Set<string>();
+            let pendingProgressEventSend = Promise.resolve();
+            const markVisibleReplyDelivery = () => {
+              lastVisibleReplyDeliveryAt = Date.now();
+            };
+            const rememberVisibleBlockReplyText = (text: string | undefined) => {
+              const normalized = text?.trim();
+              if (normalized) {
+                sentBlockReplyTexts.add(normalized);
+              }
+            };
+            const wasVisibleBlockReplyText = (text: string | undefined) => {
+              const normalized = text?.trim();
+              return Boolean(normalized && sentBlockReplyTexts.has(normalized));
+            };
+            const sendProgressEventMessage = (
+              text: string,
+              options?: { force?: boolean; rememberBlockReply?: boolean },
+            ): Promise<void> => {
+              pendingProgressEventSend = pendingProgressEventSend.then(async () => {
+                try {
+                  const normalized = normalizeProgressEventText(text);
+                  if (!normalized) {
+                    return;
+                  }
+                  const now = Date.now();
+                  if (
+                    normalized === lastProgressEventText ||
+                    (!options?.force &&
+                      now - lastProgressEventSentAt < PROGRESS_EVENT_MIN_INTERVAL_MS)
+                  ) {
+                    log?.info?.(
+                      `naverworks[${account.accountId}]: progress event skipped for ${event.userId} (duplicate or throttled)`,
+                    );
+                    return;
+                  }
+                  const sent = await sendMessageNaverWorks({
+                    account,
+                    toUserId: event.userId,
+                    text: normalized,
+                  });
+                  if (!sent.ok) {
+                    log?.warn?.(
+                      `naverworks[${account.accountId}]: failed to send progress event to ${event.userId} (reason=${sent.reason}, status=${sent.status ?? "unknown"}, body=${sent.body?.slice(0, 300) ?? ""})`,
+                    );
+                    return;
+                  }
+                  lastProgressEventText = normalized;
+                  lastProgressEventSentAt = now;
+                  if (options?.rememberBlockReply) {
+                    rememberVisibleBlockReplyText(normalized);
+                  }
+                  markVisibleReplyDelivery();
+                  log?.info?.(
+                    `naverworks[${account.accountId}]: sent progress event to ${event.userId} textChars=${normalized.length}`,
+                  );
+                } catch (error) {
+                  log?.warn?.(
+                    `naverworks[${account.accountId}]: progress event send threw for ${event.userId}: ${String(error)}`,
+                  );
+                }
+              });
+              return pendingProgressEventSend;
+            };
+            const sourceReplyDeliveryMode = "automatic";
             try {
               const dispatchResult =
                 await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
                   ctx: msgCtx,
                   cfg: freshCfg,
-                  replyOptions: { sourceReplyDeliveryMode: "automatic" },
+                  replyOptions: {
+                    sourceReplyDeliveryMode,
+                    suppressDefaultToolProgressMessages: true,
+                    allowToolLifecycleWhenProgressHidden: true,
+                    allowProgressCallbacksWhenSourceDeliverySuppressed: true,
+                    preserveProgressCallbackStartOrder: true,
+                    commentaryProgressEnabled: true,
+                    progressPreambleEnabled: true,
+                    commentaryPayloadsEnabled: true,
+                    reasoningPayloadsEnabled: account.progressEvents?.reasoning ? true : undefined,
+                    onBlockReplyQueued: account.progressEvents?.blockReply
+                      ? async (payload: {
+                          text?: string;
+                          body?: string;
+                          isReasoning?: boolean;
+                        }) => {
+                          if (payload.isReasoning && !account.progressEvents?.reasoning) {
+                            return;
+                          }
+                          const text = normalizeProgressEventText(payload.text ?? payload.body);
+                          if (text) {
+                            await sendProgressEventMessage(text, {
+                              force: true,
+                              rememberBlockReply: true,
+                            });
+                          }
+                        }
+                      : undefined,
+                    onPartialReply: undefined,
+                    onNarrationUpdate: account.progressEvents?.narration
+                      ? async (payload: { text?: string }) => {
+                          const text = normalizeProgressEventText(payload.text);
+                          if (text) {
+                            sendProgressEventMessage(`💬 ${text}`);
+                          }
+                        }
+                      : undefined,
+                    onReasoningStream: account.progressEvents?.reasoning
+                      ? async (payload: { text?: string; isReasoningSnapshot?: boolean }) => {
+                          const text = normalizeProgressEventText(payload.text);
+                          if (text) {
+                            sendProgressEventMessage(`🧠 ${text}`);
+                          }
+                        }
+                      : undefined,
+                    onItemEvent: account.progressEvents?.item
+                      ? async (payload: {
+                          kind?: string;
+                          progressText?: string;
+                          summary?: string;
+                          title?: string;
+                          name?: string;
+                          status?: string;
+                        }) => {
+                          const text = resolveProgressItemEventText(payload);
+                          if (text) {
+                            sendProgressEventMessage(text);
+                          }
+                        }
+                      : undefined,
+                    onToolStart: account.progressEvents?.toolStart
+                      ? async (payload: { name?: string; phase?: string; detailMode?: string }) => {
+                          const text = resolveProgressToolStartText(payload);
+                          if (text) {
+                            sendProgressEventMessage(text);
+                          }
+                        }
+                      : undefined,
+                    onToolResult: account.progressEvents?.toolResult
+                      ? async (payload: { text?: string; body?: string }) => {
+                          const text = resolveProgressToolResultText(payload);
+                          if (text) {
+                            sendProgressEventMessage(text);
+                          }
+                        }
+                      : undefined,
+                    onCommandOutput: account.progressEvents?.commandOutput
+                      ? async (payload: { text?: string; output?: string }) => {
+                          const text = resolveProgressCommandOutputText(payload);
+                          if (text) {
+                            sendProgressEventMessage(text);
+                          }
+                        }
+                      : undefined,
+                    onPlanUpdate: account.progressEvents?.planUpdate
+                      ? async (payload: {
+                          steps?: Array<{ step?: string; status?: string }>;
+                          text?: string;
+                          summary?: string;
+                          explanation?: string;
+                        }) => {
+                          const text = resolveProgressPlanUpdateText(payload);
+                          if (text) {
+                            sendProgressEventMessage(text);
+                          }
+                        }
+                      : undefined,
+                    onApprovalEvent: account.progressEvents?.approvalEvent
+                      ? async (payload: {
+                          status?: string;
+                          title?: string;
+                          summary?: string;
+                          text?: string;
+                        }) => {
+                          const text = resolveProgressApprovalEventText(payload);
+                          if (text) {
+                            sendProgressEventMessage(text);
+                          }
+                        }
+                      : undefined,
+                    timeoutOverrideSeconds: account.runTimeoutSeconds,
+                  },
                   dispatcherOptions: {
                     onReplyStart: async () => {
                       log?.info?.(
@@ -948,25 +1338,34 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                       stopProgressMessageHeartbeat = startProgressMessageHeartbeat({
                         account,
                         userId: event.userId,
+                        shouldSkip: () =>
+                          lastVisibleReplyDeliveryAt > 0 &&
+                          Date.now() - lastVisibleReplyDeliveryAt <
+                            (account.progressMessages?.intervalMs ?? 60_000),
                         log,
                       });
                     },
-                    deliver: async (payload: {
-                      text?: string;
-                      body?: string;
-                      mediaUrl?: string;
-                      mediaUrls?: string[];
-                      audioAsVoice?: boolean;
-                    }) => {
+                    deliver: async (
+                      payload: {
+                        text?: string;
+                        body?: string;
+                        mediaUrl?: string;
+                        mediaUrls?: string[];
+                        audioAsVoice?: boolean;
+                      },
+                      info?: { kind?: string },
+                    ) => {
                       const text = payload?.text ?? payload?.body;
                       const mediaUrls = resolveOutboundMediaUrls(payload ?? {});
                       const remoteMediaUrls = mediaUrls.filter((url) => /^https?:\/\//i.test(url));
                       const localMediaPaths = mediaUrls.filter((url) => !/^https?:\/\//i.test(url));
                       const pendingRemoteMedia = [...remoteMediaUrls];
                       let pendingText = text;
-                      await stopProgressMessageHeartbeat();
+                      if (!info?.kind || info.kind === "final") {
+                        await stopProgressMessageHeartbeat();
+                      }
                       log?.info?.(
-                        `naverworks[${account.accountId}]: deliver callback text=${text ? "yes" : "no"} remoteMedia=${remoteMediaUrls.length} localMedia=${localMediaPaths.length}`,
+                        `naverworks[${account.accountId}]: deliver callback kind=${info?.kind ?? "unknown"} text=${text ? "yes" : "no"} remoteMedia=${remoteMediaUrls.length} localMedia=${localMediaPaths.length}`,
                       );
 
                       if (localMediaPaths.length > 0) {
@@ -978,6 +1377,18 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                       log?.info?.(
                         `naverworks[${account.accountId}]: outbound routing pendingText=${pendingText ? "yes" : "no"} remoteMediaRemaining=${pendingRemoteMedia.length} localMediaRemaining=${localMediaPaths.length}`,
                       );
+                      if (info?.kind && info.kind !== "final") {
+                        pendingText = undefined;
+                        if (pendingRemoteMedia.length === 0 && localMediaPaths.length === 0) {
+                          return;
+                        }
+                      }
+                      if (wasVisibleBlockReplyText(pendingText)) {
+                        log?.info?.(
+                          `naverworks[${account.accountId}]: skipped duplicate final text already delivered as block reply to ${event.userId}`,
+                        );
+                        pendingText = undefined;
+                      }
                       if (pendingText) {
                         log?.info?.(
                           `naverworks[${account.accountId}]: sending standalone text message to ${event.userId} textChars=${pendingText.length}`,
@@ -1010,6 +1421,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         log?.info?.(
                           `naverworks[${account.accountId}]: outbound text delivered to ${event.userId} ${formatDeliveryLog(sent.delivery)}`,
                         );
+                        markVisibleReplyDelivery();
                       }
 
                       for (const mediaUrl of pendingRemoteMedia) {
@@ -1042,6 +1454,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         log?.info?.(
                           `naverworks[${account.accountId}]: outbound media delivered to ${event.userId} ${formatDeliveryLog(sentMedia.delivery)}`,
                         );
+                        markVisibleReplyDelivery();
                       }
 
                       for (const mediaPath of localMediaPaths) {
@@ -1074,10 +1487,30 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         log?.info?.(
                           `naverworks[${account.accountId}]: outbound local media delivered to ${event.userId} ${formatDeliveryLog(sentMedia.delivery)}`,
                         );
+                        markVisibleReplyDelivery();
                       }
                     },
                   },
                 });
+              await pendingProgressEventSend;
+              log?.info?.(
+                [
+                  `naverworks[${account.accountId}]: dispatch result`,
+                  `sessionKey=${route.sessionKey}`,
+                  `sourceReplyDeliveryMode=${dispatchResult.sourceReplyDeliveryMode ?? sourceReplyDeliveryMode}`,
+                  `queuedFinal=${dispatchResult.queuedFinal ? "yes" : "no"}`,
+                  `counts=tool:${dispatchResult.counts?.tool ?? 0},block:${dispatchResult.counts?.block ?? 0},final:${dispatchResult.counts?.final ?? 0}`,
+                  `observedReplyDelivery=${dispatchResult.observedReplyDelivery ? "yes" : "no"}`,
+                  `visibleReply=${hasVisibleInboundReplyDispatch(dispatchResult) ? "yes" : "no"}`,
+                  `fallbackEligible=${dispatchResult.noVisibleReplyFallbackEligible ? "yes" : "no"}`,
+                  `sendPolicyDenied=${dispatchResult.sendPolicyDenied ? "yes" : "no"}`,
+                ].join(" "),
+              );
+              if (!hasVisibleInboundReplyDispatch(dispatchResult)) {
+                log?.warn?.(
+                  `naverworks[${account.accountId}]: agent run completed without a visible source reply for ${event.userId} (fallbackEligible=${dispatchResult.noVisibleReplyFallbackEligible ? "yes" : "no"})`,
+                );
+              }
               const debugDecision = resolveDebugSummaryDecision({
                 account,
                 userId: event.userId,
@@ -1108,6 +1541,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
               }
               await stopProgressMessageHeartbeat();
             } catch (error) {
+              await pendingProgressEventSend;
               await stopProgressMessageHeartbeat();
               const failedNoticeSent = await sendMessageNaverWorks({
                 account,

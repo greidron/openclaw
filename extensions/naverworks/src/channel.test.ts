@@ -4,7 +4,10 @@ import {
   createNaverWorksPlugin,
   downloadNaverWorksInboundMedia,
   parseNaverWorksDebugCommand,
+  resolveNaverWorksHeartbeatProgressTextForTest,
   resolveAutoThinkingDirective,
+  resolveNaverWorksProgressEventTextForTest,
+  resolveNaverWorksPartialReplyProgressText,
   resolveNaverWorksAttachmentDownloadUrl,
 } from "./channel.js";
 import { setNaverWorksRuntime } from "./runtime.js";
@@ -268,5 +271,87 @@ describe("naverworks channel plugin", () => {
     expect(
       resolveAutoThinkingDirective({ text: "/think low 그리고 답변해줘", account }),
     ).toBeUndefined();
+  });
+
+  it("projects assistant partial replies into incremental NAVER WORKS progress text", () => {
+    const first = resolveNaverWorksPartialReplyProgressText(
+      { text: "기록 레코드를 만들겠습니다." },
+      "",
+    );
+    expect(first).toEqual({
+      text: "기록 레코드를 만들겠습니다.",
+      nextText: "기록 레코드를 만들겠습니다.",
+    });
+
+    const second = resolveNaverWorksPartialReplyProgressText(
+      { text: "기록 레코드를 만들겠습니다. 카드번호는 비워두겠습니다." },
+      first.nextText,
+    );
+    expect(second).toEqual({
+      text: "카드번호는 비워두겠습니다.",
+      nextText: "기록 레코드를 만들겠습니다. 카드번호는 비워두겠습니다.",
+    });
+
+    expect(
+      resolveNaverWorksPartialReplyProgressText({ delta: " 다음 단계입니다." }, second.nextText),
+    ).toEqual({
+      text: "다음 단계입니다.",
+      nextText: "기록 레코드를 만들겠습니다. 카드번호는 비워두겠습니다. 다음 단계입니다.",
+    });
+  });
+
+  it("formats web UI-style progress events for NAVER WORKS timeline messages", () => {
+    expect(
+      resolveNaverWorksProgressEventTextForTest({
+        kind: "tool-start",
+        payload: { name: "openclaw cron run", phase: "started" },
+      }),
+    ).toBe("🛠️ openclaw cron run 실행 중 (started)");
+    expect(
+      resolveNaverWorksProgressEventTextForTest({
+        kind: "tool-result",
+        payload: { text: "수동 실행이 진행 중입니다." },
+      }),
+    ).toBe("✅ 도구 결과: 수동 실행이 진행 중입니다.");
+    expect(
+      resolveNaverWorksProgressEventTextForTest({
+        kind: "command-output",
+        payload: { output: "cron run --help" },
+      }),
+    ).toBe("💻 명령 출력: cron run --help");
+    expect(
+      resolveNaverWorksProgressEventTextForTest({
+        kind: "plan-update",
+        payload: { steps: [{ step: "README 수정", status: "in_progress" }] },
+      }),
+    ).toBe("🧭 진행 중: README 수정");
+    expect(
+      resolveNaverWorksProgressEventTextForTest({
+        kind: "plan-update",
+        payload: { explanation: "README를 오전 7시 기준으로 맞추는 중입니다." },
+      }),
+    ).toBe("🧭 계획 업데이트: README를 오전 7시 기준으로 맞추는 중입니다.");
+  });
+
+  it("switches the third placeholder heartbeat to a long-running notice", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            progressMessages: {
+              text: "생각 중입니다...",
+              emojis: ["🕒"],
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(resolveNaverWorksHeartbeatProgressTextForTest(account, 1)).toBe("🕒 생각 중입니다...");
+    expect(resolveNaverWorksHeartbeatProgressTextForTest(account, 3)).toBe(
+      "🕒 평소보다 응답이 오래 걸립니다. 결과가 오면 알려드리겠습니다.",
+    );
+    expect(resolveNaverWorksHeartbeatProgressTextForTest(account, 4)).toBe("");
   });
 });

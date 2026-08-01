@@ -7,8 +7,6 @@ type ParsedMarkdownTable = {
   extraCount: number;
 };
 
-const COMPACT_TABLE_ROW_MAX_BYTES = 80;
-
 export type NaverWorksFlexBoxLayout = "horizontal" | "vertical" | "baseline";
 
 export type NaverWorksFlexComponent =
@@ -145,20 +143,6 @@ function normalizeInlineMarkdown(text: string): string {
     .trim();
 }
 
-function getUtf8ByteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
-
-function getRenderedTableRowByteLength(row: string[]): number {
-  return getUtf8ByteLength(row.map((cell) => cell.trim()).join(" | "));
-}
-
-function shouldRenderCompactTable(table: ParsedMarkdownTable): boolean {
-  return [table.headers, ...table.rows].every(
-    (row) => getRenderedTableRowByteLength(row) < COMPACT_TABLE_ROW_MAX_BYTES,
-  );
-}
-
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:)\]}]+$/;
 const CLICKABLE_URL_CANDIDATE_RE =
   /(?:https?:\/\/|www\.)(?:[^\s<>"']+)|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"']*)?/gi;
@@ -277,68 +261,7 @@ function createTableRowComponents(
   table: ParsedMarkdownTable,
   options: { textColor: string; sectionTitleColor: string },
 ): NaverWorksFlexComponent[] {
-  if (shouldRenderCompactTable(table)) {
-    return createCompactTableRowComponents(table, options);
-  }
   return createExpandedTableRowComponents(table, options);
-}
-
-function createCompactTableRowComponents(
-  table: ParsedMarkdownTable,
-  options: { textColor: string; sectionTitleColor: string },
-): NaverWorksFlexComponent[] {
-  const contents: NaverWorksFlexComponent[] = [
-    {
-      type: "box",
-      layout: "horizontal",
-      margin: "sm",
-      spacing: "sm",
-      contents: table.headers.map((header, index) => ({
-        ...createTextComponent(header.trim() || `Column ${index + 1}`, {
-          bold: true,
-          color: options.sectionTitleColor,
-          size: "sm",
-        }),
-        flex: 1,
-      })),
-    },
-  ];
-
-  for (const [rowIndex, row] of table.rows.entries()) {
-    contents.push({ type: "separator", margin: "sm" });
-    contents.push({
-      type: "box",
-      layout: "horizontal",
-      margin: "sm",
-      spacing: "sm",
-      contents: table.headers.map((_header, index) => {
-        const cellComponents = createTextLineComponents(row[index]?.trim() || "-", {
-          color: options.textColor,
-          size: "sm",
-        });
-        if (cellComponents.length === 1) {
-          return { ...cellComponents[0], flex: 1 };
-        }
-        return {
-          type: "box" as const,
-          layout: "vertical" as const,
-          contents: cellComponents,
-          flex: 1,
-        };
-      }),
-    });
-  }
-
-  if (table.extraCount > 0) {
-    contents.push(
-      ...createTextLineComponents(`... and ${table.extraCount} more row(s)`, {
-        margin: "sm",
-        color: options.textColor,
-        size: "sm",
-      }),
-    );
-  }
-  return contents;
 }
 
 function createExpandedTableRowComponents(

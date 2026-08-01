@@ -23,6 +23,21 @@ const DEFAULT_DEBUG_SUMMARY: Required<NonNullable<NaverWorksAccount["debugSummar
   includeCosts: true,
 };
 
+const DEFAULT_PROGRESS_EVENTS: Required<NonNullable<NaverWorksAccount["progressEvents"]>> = {
+  blockReply: true,
+  partialReply: false,
+  reasoning: false,
+  narration: true,
+  item: true,
+  toolStart: true,
+  toolResult: false,
+  commandOutput: false,
+  planUpdate: true,
+  approvalEvent: true,
+};
+
+const DEFAULT_RUN_TIMEOUT_SECONDS = 30 * 60;
+
 function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -64,6 +79,19 @@ function asPositiveInteger(value: unknown): number | undefined {
   return candidate;
 }
 
+function asNonNegativeInteger(value: unknown): number | undefined {
+  const candidate =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+  if (!Number.isSafeInteger(candidate) || candidate < 0) {
+    return undefined;
+  }
+  return candidate;
+}
+
 export function listAccountIds(cfg: Record<string, unknown>): string[] {
   const section = ((cfg as any)?.channels?.naverworks ?? {}) as Record<string, unknown>;
   const accounts = (section.accounts ?? {}) as Record<string, unknown>;
@@ -87,6 +115,8 @@ export function resolveAccount(
   const accountStatusStickers = (accountCfg.statusStickers ?? {}) as Record<string, unknown>;
   const sectionDebugSummary = (section.debugSummary ?? {}) as Record<string, unknown>;
   const accountDebugSummary = (accountCfg.debugSummary ?? {}) as Record<string, unknown>;
+  const sectionProgressEvents = (section.progressEvents ?? {}) as Record<string, unknown>;
+  const accountProgressEvents = (accountCfg.progressEvents ?? {}) as Record<string, unknown>;
   const progressMessageEmojis = [
     ...asStringList(sectionProgressMessages.emojis),
     ...asStringList(accountProgressMessages.emojis),
@@ -189,6 +219,52 @@ export function resolveAccount(
         DEFAULT_PROGRESS_MESSAGES.intervalMs,
       emojis:
         progressMessageEmojis.length > 0 ? progressMessageEmojis : DEFAULT_PROGRESS_MESSAGES.emojis,
+    },
+    runTimeoutSeconds:
+      asNonNegativeInteger(accountCfg.runTimeoutSeconds) ??
+      asNonNegativeInteger(section.runTimeoutSeconds) ??
+      DEFAULT_RUN_TIMEOUT_SECONDS,
+    progressEvents: {
+      blockReply:
+        (accountProgressEvents.blockReply as boolean | undefined) ??
+        (sectionProgressEvents.blockReply as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.blockReply,
+      partialReply:
+        (accountProgressEvents.partialReply as boolean | undefined) ??
+        (sectionProgressEvents.partialReply as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.partialReply,
+      reasoning:
+        (accountProgressEvents.reasoning as boolean | undefined) ??
+        (sectionProgressEvents.reasoning as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.reasoning,
+      narration:
+        (accountProgressEvents.narration as boolean | undefined) ??
+        (sectionProgressEvents.narration as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.narration,
+      item:
+        (accountProgressEvents.item as boolean | undefined) ??
+        (sectionProgressEvents.item as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.item,
+      toolStart:
+        (accountProgressEvents.toolStart as boolean | undefined) ??
+        (sectionProgressEvents.toolStart as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.toolStart,
+      toolResult:
+        (accountProgressEvents.toolResult as boolean | undefined) ??
+        (sectionProgressEvents.toolResult as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.toolResult,
+      commandOutput:
+        (accountProgressEvents.commandOutput as boolean | undefined) ??
+        (sectionProgressEvents.commandOutput as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.commandOutput,
+      planUpdate:
+        (accountProgressEvents.planUpdate as boolean | undefined) ??
+        (sectionProgressEvents.planUpdate as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.planUpdate,
+      approvalEvent:
+        (accountProgressEvents.approvalEvent as boolean | undefined) ??
+        (sectionProgressEvents.approvalEvent as boolean | undefined) ??
+        DEFAULT_PROGRESS_EVENTS.approvalEvent,
     },
     debugSummary: {
       enabled:

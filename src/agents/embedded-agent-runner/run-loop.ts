@@ -51,6 +51,73 @@ import { resolveEmbeddedRunTerminalTimeout } from "./run/terminal-timeout.js";
 import type { EmbeddedAgentRunResult, TraceAttempt } from "./types.js";
 import { createUsageAccumulator } from "./usage-accumulator.js";
 
+function formatRunLoopAttemptDiagnostics(params: {
+  sessionKey?: string;
+  sessionId?: string;
+  iteration: number;
+  maxIterations: number;
+  provider: string;
+  modelId: string;
+  attempt: unknown;
+  currentAttemptAssistant: unknown;
+  currentAttemptCompletedAssistant: unknown;
+  terminalOutcome: unknown;
+  promptError: unknown;
+  timedOut: boolean;
+  idleTimedOut: boolean;
+  timedOutDuringCompaction: boolean;
+  timedOutDuringToolExecution: boolean;
+  timedOutByRunBudget: boolean;
+  terminalAborted: boolean;
+  terminalTimedOut: boolean;
+  terminalInterrupted: boolean;
+  attemptCompactionCount: number;
+  lastTurnTotal?: number;
+}): string {
+  const attempt = params.attempt as Record<string, unknown> | undefined;
+  const currentAssistant = params.currentAttemptAssistant as Record<string, unknown> | undefined;
+  const completedAssistant = params.currentAttemptCompletedAssistant as
+    | Record<string, unknown>
+    | undefined;
+  const terminalOutcome = params.terminalOutcome as Record<string, unknown> | undefined;
+  const stopReason =
+    currentAssistant?.stopReason ?? completedAssistant?.stopReason ?? terminalOutcome?.stopReason;
+  const text =
+    typeof currentAssistant?.text === "string"
+      ? currentAssistant.text
+      : typeof completedAssistant?.text === "string"
+        ? completedAssistant.text
+        : undefined;
+  const rawText =
+    typeof currentAssistant?.rawText === "string"
+      ? currentAssistant.rawText
+      : typeof completedAssistant?.rawText === "string"
+        ? completedAssistant.rawText
+        : undefined;
+  const toolMetas = Array.isArray(attempt?.toolMetas) ? attempt.toolMetas.length : 0;
+  const clientToolCalls = Array.isArray(attempt?.clientToolCalls)
+    ? attempt.clientToolCalls.length
+    : 0;
+  const payloads = Array.isArray(attempt?.payloads) ? attempt.payloads.length : 0;
+  const promptErrorName =
+    params.promptError && typeof params.promptError === "object"
+      ? ((params.promptError as { name?: string }).name ?? "Error")
+      : params.promptError
+        ? typeof params.promptError
+        : "none";
+  return (
+    `[run-loop-attempt] sessionKey=${params.sessionKey ?? params.sessionId ?? "unknown"} ` +
+    `iteration=${params.iteration}/${params.maxIterations} provider=${params.provider}/${params.modelId} ` +
+    `assistant=${params.currentAttemptAssistant ? "yes" : "no"} completedAssistant=${params.currentAttemptCompletedAssistant ? "yes" : "no"} ` +
+    `stopReason=${String(stopReason ?? "none")} textChars=${text?.length ?? 0} rawTextChars=${rawText?.length ?? 0} ` +
+    `tools=${toolMetas} clientToolCalls=${clientToolCalls} payloads=${payloads} ` +
+    `timedOut=${params.timedOut} idleTimedOut=${params.idleTimedOut} terminalTimedOut=${params.terminalTimedOut} ` +
+    `terminalAborted=${params.terminalAborted} terminalInterrupted=${params.terminalInterrupted} ` +
+    `timeoutCompaction=${params.timedOutDuringCompaction} timeoutTools=${params.timedOutDuringToolExecution} timeoutBudget=${params.timedOutByRunBudget} ` +
+    `compactions=${params.attemptCompactionCount} promptError=${promptErrorName} lastTurnTotal=${params.lastTurnTotal ?? "unknown"}`
+  );
+}
+
 export async function runPreparedEmbeddedLoop(
   input: PreparedEmbeddedRunInput,
 ): Promise<EmbeddedAgentRunResult> {
@@ -364,6 +431,12 @@ export async function runPreparedEmbeddedLoop(
         return normalizedAttempt.result;
       }
       if (normalizedAttempt.action === "retry") {
+        log.info(
+          `[run-loop-retry] sessionKey=${params.sessionKey ?? params.sessionId} ` +
+            `iteration=${runLoopIterations}/${MAX_RUN_LOOP_ITERATIONS} provider=${provider}/${modelId} ` +
+            `stage=normalize replayInvalid=${normalizedAttempt.replayState.replayInvalid ? "yes" : "no"} ` +
+            `lastTurnTotal=${normalizedAttempt.lastTurnTotal ?? "unknown"}`,
+        );
         bootstrapPromptWarningSignaturesSeen =
           normalizedAttempt.bootstrapPromptWarningSignaturesSeen;
         lastRunPromptUsage = normalizedAttempt.lastRunPromptUsage;
@@ -401,6 +474,31 @@ export async function runPreparedEmbeddedLoop(
         resolveReplayInvalidForAttempt,
         canRestartForLiveSwitch,
       } = normalizedAttempt;
+      log.info(
+        formatRunLoopAttemptDiagnostics({
+          sessionKey: params.sessionKey,
+          sessionId: params.sessionId,
+          iteration: runLoopIterations,
+          maxIterations: MAX_RUN_LOOP_ITERATIONS,
+          provider,
+          modelId,
+          attempt,
+          currentAttemptAssistant,
+          currentAttemptCompletedAssistant,
+          terminalOutcome,
+          promptError,
+          timedOut,
+          idleTimedOut,
+          timedOutDuringCompaction,
+          timedOutDuringToolExecution,
+          timedOutByRunBudget,
+          terminalAborted,
+          terminalTimedOut,
+          terminalInterrupted,
+          attemptCompactionCount,
+          lastTurnTotal,
+        }),
+      );
       const recovery = await recoverEmbeddedRunAttempt({
         runInput: input,
         preparedRuntime,
@@ -428,6 +526,12 @@ export async function runPreparedEmbeddedLoop(
         return recovery.result;
       }
       if (recovery.action === "retry") {
+        log.info(
+          `[run-loop-retry] sessionKey=${params.sessionKey ?? params.sessionId} ` +
+            `iteration=${runLoopIterations}/${MAX_RUN_LOOP_ITERATIONS} provider=${provider}/${modelId} ` +
+            `stage=recovery thinkLevel=${recovery.thinkLevel ?? "default"} ` +
+            `authRetry=${recovery.authRetryPending ? "yes" : "no"} failoverReason=${recovery.lastRetryFailoverReason ?? "none"}`,
+        );
         thinkLevel = recovery.thinkLevel;
         authRetryPending = recovery.authRetryPending;
         codexAppServerRecoveryRetries = recovery.codexAppServerRecoveryRetries;
@@ -498,6 +602,15 @@ export async function runPreparedEmbeddedLoop(
         failoverRetryController.resetSameModelRateLimitRetries();
       }
       if (assistantFailureOutcome.action === "retry") {
+        log.info(
+          `[run-loop-retry] sessionKey=${params.sessionKey ?? params.sessionId} ` +
+            `iteration=${runLoopIterations}/${MAX_RUN_LOOP_ITERATIONS} provider=${provider}/${modelId} ` +
+            `stage=assistant-failure thinkLevel=${assistantFailureOutcome.thinkLevel ?? "default"} ` +
+            `authRetry=${assistantFailureOutcome.authRetryPending ? "yes" : "no"} ` +
+            `emptyErrorRetries=${assistantFailureOutcome.emptyErrorRetries} ` +
+            `sameModelIdleTimeoutRetries=${assistantFailureOutcome.sameModelIdleTimeoutRetries} ` +
+            `failoverReason=${assistantFailureOutcome.lastRetryFailoverReason ?? "none"}`,
+        );
         continue;
       }
       const assistantProfileFailureReason = assistantFailureOutcome.assistantProfileFailureReason;
@@ -615,6 +728,13 @@ export async function runPreparedEmbeddedLoop(
         contextRecoveryState,
       });
       if (terminalResolution.action === "retry") {
+        const terminalRetry = terminalResolution as { reason?: string; text?: string };
+        log.info(
+          `[run-loop-retry] sessionKey=${params.sessionKey ?? params.sessionId} ` +
+            `iteration=${runLoopIterations}/${MAX_RUN_LOOP_ITERATIONS} provider=${provider}/${modelId} ` +
+            `stage=terminal-resolution reason=${terminalRetry.reason ?? "unspecified"} ` +
+            `message=${terminalRetry.text ? JSON.stringify(terminalRetry.text.slice(0, 160)) : "none"}`,
+        );
         continue;
       }
       return terminalResolution.result;

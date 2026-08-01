@@ -37,6 +37,19 @@ export type NaverWorksAccount = {
     intervalMs: number;
     emojis: string[];
   };
+  runTimeoutSeconds?: number;
+  progressEvents?: {
+    blockReply: boolean;
+    partialReply: boolean;
+    reasoning: boolean;
+    narration: boolean;
+    item: boolean;
+    toolStart: boolean;
+    toolResult: boolean;
+    commandOutput: boolean;
+    planUpdate: boolean;
+    approvalEvent: boolean;
+  };
   debugSummary?: {
     enabled: boolean;
     includeCosts: boolean;

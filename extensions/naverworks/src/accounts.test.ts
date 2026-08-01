@@ -230,6 +230,84 @@ describe("resolveAccount", () => {
     });
   });
 
+  it("merges progressEvents with account override", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            progressEvents: {
+              blockReply: true,
+              toolStart: false,
+              toolResult: true,
+            },
+            accounts: {
+              default: {
+                progressEvents: {
+                  commandOutput: true,
+                  reasoning: true,
+                  toolResult: false,
+                },
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.progressEvents).toEqual({
+      blockReply: true,
+      partialReply: false,
+      reasoning: true,
+      narration: true,
+      item: true,
+      toolStart: false,
+      toolResult: false,
+      commandOutput: true,
+      planUpdate: true,
+      approvalEvent: true,
+    });
+  });
+
+  it("defaults NAVER WORKS runs to a longer channel timeout", () => {
+    const account = resolveAccount({ channels: { naverworks: {} } }, "default");
+
+    expect(account.runTimeoutSeconds).toBe(30 * 60);
+  });
+
+  it("resolves runTimeoutSeconds with account override and allows no-timeout sentinel", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            runTimeoutSeconds: 600,
+            accounts: {
+              default: {
+                runTimeoutSeconds: 1200,
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.runTimeoutSeconds).toBe(1200);
+
+    expect(
+      resolveAccount(
+        {
+          channels: {
+            naverworks: {
+              runTimeoutSeconds: 0,
+            },
+          },
+        },
+        "default",
+      ).runTimeoutSeconds,
+    ).toBe(0);
+  });
+
   it("keeps legacy single progress text as the only candidate when texts are omitted", () => {
     const account = resolveAccount(
       {
