@@ -295,6 +295,9 @@ function resolveProgressItemEventText(payload: {
   name?: string;
   status?: string;
 }): string | undefined {
+  if (payload.kind === "reasoning") {
+    return undefined;
+  }
   const text =
     normalizeProgressEventText(payload.progressText) ??
     normalizeProgressEventText(payload.summary) ??
@@ -1144,6 +1147,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
             let lastVisibleReplyDeliveryAt = 0;
             let lastProgressEventText = "";
             let lastProgressEventSentAt = 0;
+            let latestReasoningSnapshotText = "";
             const sentBlockReplyTexts = new Set<string>();
             let pendingProgressEventSend = Promise.resolve();
             const markVisibleReplyDelivery = () => {
@@ -1253,9 +1257,17 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                       : undefined,
                     onReasoningStream: account.progressEvents?.reasoning
                       ? async (payload: { text?: string; isReasoningSnapshot?: boolean }) => {
-                          const text = normalizeProgressEventText(payload.text);
+                          if (payload.isReasoningSnapshot) {
+                            latestReasoningSnapshotText = normalizeProgressEventText(payload.text);
+                          }
+                        }
+                      : undefined,
+                    onReasoningEnd: account.progressEvents?.reasoning
+                      ? async () => {
+                          const text = latestReasoningSnapshotText;
+                          latestReasoningSnapshotText = "";
                           if (text) {
-                            sendProgressEventMessage(`🧠 ${text}`);
+                            await sendProgressEventMessage(`🧠 ${text}`, { force: true });
                           }
                         }
                       : undefined,
