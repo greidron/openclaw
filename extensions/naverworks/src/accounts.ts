@@ -23,17 +23,25 @@ const DEFAULT_DEBUG_SUMMARY: Required<NonNullable<NaverWorksAccount["debugSummar
   includeCosts: true,
 };
 
+const DEFAULT_STATUS_STICKERS: Required<NonNullable<NaverWorksAccount["statusStickers"]>> = {
+  enabled: true,
+  sticker: {
+    packageId: "789",
+    stickerId: "10855",
+  },
+};
+
 const DEFAULT_PROGRESS_EVENTS: Required<NonNullable<NaverWorksAccount["progressEvents"]>> = {
-  blockReply: true,
+  blockReply: false,
   partialReply: false,
-  reasoning: false,
-  narration: true,
-  item: true,
-  toolStart: true,
+  reasoning: true,
+  narration: false,
+  item: false,
+  toolStart: false,
   toolResult: false,
   commandOutput: false,
-  planUpdate: true,
-  approvalEvent: true,
+  planUpdate: false,
+  approvalEvent: false,
 };
 
 const DEFAULT_RUN_TIMEOUT_SECONDS = 30 * 60;
@@ -113,6 +121,8 @@ export function resolveAccount(
   const accountProgressMessages = (accountCfg.progressMessages ?? {}) as Record<string, unknown>;
   const sectionStatusStickers = (section.statusStickers ?? {}) as Record<string, unknown>;
   const accountStatusStickers = (accountCfg.statusStickers ?? {}) as Record<string, unknown>;
+  const sectionStatusSticker = (sectionStatusStickers.sticker ?? {}) as Record<string, unknown>;
+  const accountStatusSticker = (accountStatusStickers.sticker ?? {}) as Record<string, unknown>;
   const sectionDebugSummary = (section.debugSummary ?? {}) as Record<string, unknown>;
   const accountDebugSummary = (accountCfg.debugSummary ?? {}) as Record<string, unknown>;
   const sectionProgressEvents = (section.progressEvents ?? {}) as Record<string, unknown>;
@@ -203,8 +213,6 @@ export function resolveAccount(
       enabled:
         (accountProgressMessages.enabled as boolean | undefined) ??
         (sectionProgressMessages.enabled as boolean | undefined) ??
-        (accountStatusStickers.enabled as boolean | undefined) ??
-        (sectionStatusStickers.enabled as boolean | undefined) ??
         DEFAULT_PROGRESS_MESSAGES.enabled,
       text: progressMessageText,
       texts:
@@ -219,6 +227,22 @@ export function resolveAccount(
         DEFAULT_PROGRESS_MESSAGES.intervalMs,
       emojis:
         progressMessageEmojis.length > 0 ? progressMessageEmojis : DEFAULT_PROGRESS_MESSAGES.emojis,
+    },
+    statusStickers: {
+      enabled:
+        (accountStatusStickers.enabled as boolean | undefined) ??
+        (sectionStatusStickers.enabled as boolean | undefined) ??
+        DEFAULT_STATUS_STICKERS.enabled,
+      sticker: {
+        packageId:
+          asString(accountStatusSticker.packageId) ??
+          asString(sectionStatusSticker.packageId) ??
+          DEFAULT_STATUS_STICKERS.sticker.packageId,
+        stickerId:
+          asString(accountStatusSticker.stickerId) ??
+          asString(sectionStatusSticker.stickerId) ??
+          DEFAULT_STATUS_STICKERS.sticker.stickerId,
+      },
     },
     runTimeoutSeconds:
       asNonNegativeInteger(accountCfg.runTimeoutSeconds) ??

@@ -77,6 +77,12 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
       statusStickers: z
         .object({
           enabled: z.boolean().optional(),
+          sticker: z
+            .object({
+              packageId: z.string().optional(),
+              stickerId: z.string().optional(),
+            })
+            .optional(),
         })
         .optional(),
       debugSummary: z
@@ -370,9 +376,21 @@ function resolveProgressApprovalEventText(payload: {
 }
 
 export function resolveNaverWorksProgressEventTextForTest(params: {
-  kind: "tool-start" | "tool-result" | "command-output" | "plan-update" | "approval-event";
+  kind: "item" | "tool-start" | "tool-result" | "command-output" | "plan-update" | "approval-event";
   payload: Record<string, unknown>;
 }): string | undefined {
+  if (params.kind === "item") {
+    return resolveProgressItemEventText(
+      params.payload as {
+        kind?: string;
+        progressText?: string;
+        summary?: string;
+        title?: string;
+        name?: string;
+        status?: string;
+      },
+    );
+  }
   if (params.kind === "tool-start") {
     return resolveProgressToolStartText(
       params.payload as {
@@ -546,6 +564,32 @@ async function sendProgressMessage(params: {
     params.log?.info?.(
       `naverworks[${params.account.accountId}]: progress message skipped (progressMessages disabled)`,
     );
+    return;
+  }
+  if (params.account.statusStickers?.enabled) {
+    params.log?.info?.(
+      `naverworks[${params.account.accountId}]: sending progress sticker to ${params.userId}`,
+    );
+    try {
+      const sent = await sendMessageNaverWorks({
+        account: params.account,
+        toUserId: params.userId,
+        sticker: params.account.statusStickers.sticker,
+      });
+      if (!sent.ok) {
+        params.log?.warn?.(
+          `naverworks[${params.account.accountId}]: failed to send progress sticker to ${params.userId} (reason=${sent.reason}, status=${sent.status ?? "unknown"}, body=${sent.body?.slice(0, 300) ?? ""})`,
+        );
+        return;
+      }
+      params.log?.info?.(
+        `naverworks[${params.account.accountId}]: sent progress sticker to ${params.userId}`,
+      );
+    } catch (error) {
+      params.log?.error?.(
+        `naverworks[${params.account.accountId}]: progress sticker send threw userId=${params.userId}: ${String(error)}`,
+      );
+    }
     return;
   }
   const message = params.message ?? resolveNaverWorksHeartbeatProgressTextForTest(params.account);

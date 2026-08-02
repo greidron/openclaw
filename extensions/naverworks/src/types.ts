@@ -37,6 +37,10 @@ export type NaverWorksAccount = {
     intervalMs: number;
     emojis: string[];
   };
+  statusStickers?: {
+    enabled: boolean;
+    sticker: NaverWorksStickerRef;
+  };
   runTimeoutSeconds?: number;
   progressEvents?: {
     blockReply: boolean;

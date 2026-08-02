@@ -333,6 +333,15 @@ describe("naverworks channel plugin", () => {
     ).toBe("🧭 계획 업데이트: README를 오전 7시 기준으로 맞추는 중입니다.");
   });
 
+  it("drops reasoning item lifecycle messages from progress text", () => {
+    expect(
+      resolveNaverWorksProgressEventTextForTest({
+        kind: "item",
+        payload: { kind: "reasoning", title: "reasoning", status: "running" },
+      }),
+    ).toBeUndefined();
+  });
+
   it("switches the third placeholder heartbeat to a long-running notice", () => {
     const account = resolveAccount(
       {

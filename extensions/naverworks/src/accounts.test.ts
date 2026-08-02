@@ -259,13 +259,13 @@ describe("resolveAccount", () => {
       blockReply: true,
       partialReply: false,
       reasoning: true,
-      narration: true,
-      item: true,
+      narration: false,
+      item: false,
       toolStart: false,
       toolResult: false,
       commandOutput: true,
-      planUpdate: true,
-      approvalEvent: true,
+      planUpdate: false,
+      approvalEvent: false,
     });
   });
 
@@ -342,7 +342,17 @@ describe("resolveAccount", () => {
     expect(account.progressMessages?.texts).toEqual(["생각 중입니다..."]);
   });
 
-  it("preserves legacy statusStickers opt-out for progress messages", () => {
+  it("uses status stickers by default and allows text progress fallback", () => {
+    const defaultAccount = resolveAccount({ channels: { naverworks: {} } }, "default");
+
+    expect(defaultAccount.statusStickers).toEqual({
+      enabled: true,
+      sticker: {
+        packageId: "789",
+        stickerId: "10855",
+      },
+    });
+
     const account = resolveAccount(
       {
         channels: {
@@ -356,7 +366,34 @@ describe("resolveAccount", () => {
       "default",
     );
 
-    expect(account.progressMessages?.enabled).toBe(false);
+    expect(account.statusStickers?.enabled).toBe(false);
+    expect(account.progressMessages?.enabled).toBe(true);
+  });
+
+  it("allows overriding the status sticker", () => {
+    const account = resolveAccount(
+      {
+        channels: {
+          naverworks: {
+            statusStickers: {
+              sticker: {
+                packageId: "1",
+                stickerId: "2",
+              },
+            },
+          },
+        },
+      },
+      "default",
+    );
+
+    expect(account.statusStickers).toEqual({
+      enabled: true,
+      sticker: {
+        packageId: "1",
+        stickerId: "2",
+      },
+    });
   });
 
   it("resolves debug summary settings with account override", () => {
