@@ -1283,24 +1283,13 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
             let lastProgressEventText = "";
             let lastProgressEventSentAt = 0;
             let latestReasoningSnapshotText = "";
-            const sentBlockReplyTexts = new Set<string>();
             let pendingProgressEventSend = Promise.resolve();
             const markVisibleReplyDelivery = () => {
               lastVisibleReplyDeliveryAt = Date.now();
             };
-            const rememberVisibleBlockReplyText = (text: string | undefined) => {
-              const normalized = text?.trim();
-              if (normalized) {
-                sentBlockReplyTexts.add(normalized);
-              }
-            };
-            const wasVisibleBlockReplyText = (text: string | undefined) => {
-              const normalized = text?.trim();
-              return Boolean(normalized && sentBlockReplyTexts.has(normalized));
-            };
             const sendProgressEventMessage = (
               text: string,
-              options?: { force?: boolean; rememberBlockReply?: boolean },
+              options?: { force?: boolean },
             ): Promise<void> => {
               pendingProgressEventSend = pendingProgressEventSend.then(async () => {
                 try {
@@ -1332,9 +1321,6 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                   }
                   lastProgressEventText = normalized;
                   lastProgressEventSentAt = now;
-                  if (options?.rememberBlockReply) {
-                    rememberVisibleBlockReplyText(normalized);
-                  }
                   markVisibleReplyDelivery();
                   log?.info?.(
                     `naverworks[${account.accountId}]: sent progress event to ${event.userId} textChars=${normalized.length}`,
@@ -1352,12 +1338,32 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
               const blockReplyFlushBuffer = createNaverWorksBlockReplyFlushBuffer({
                 includeReasoning: account.progressEvents?.reasoning === true,
                 onFlush: async (text) => {
-                  await sendProgressEventMessage(text, {
-                    force: true,
-                    rememberBlockReply: true,
-                  });
+                  await sendProgressEventMessage(`💬 ${text}`, { force: true });
                 },
               });
+              let latestNarrationProgressText = "";
+              let latestItemProgressText = "";
+              let latestPlanProgressText = "";
+              const flushNarrationProgressMessage = async () => {
+                const text = latestNarrationProgressText;
+                latestNarrationProgressText = "";
+                if (text) {
+                  await sendProgressEventMessage(`🗣️ ${text}`, { force: true });
+                }
+              };
+              const flushLatestProgressUpdates = async () => {
+                await flushNarrationProgressMessage();
+                const itemText = latestItemProgressText;
+                latestItemProgressText = "";
+                if (itemText) {
+                  await sendProgressEventMessage(itemText, { force: true });
+                }
+                const planText = latestPlanProgressText;
+                latestPlanProgressText = "";
+                if (planText) {
+                  await sendProgressEventMessage(planText, { force: true });
+                }
+              };
               const dispatchResult =
                 await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
                   ctx: msgCtx,
@@ -1380,15 +1386,17 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                     onBlockReplyFlush: account.progressEvents?.blockReply
                       ? async () => {
                           await blockReplyFlushBuffer.flush();
+                          await flushLatestProgressUpdates();
                         }
+                      : account.progressEvents?.narration ||
+                          account.progressEvents?.item ||
+                          account.progressEvents?.planUpdate
+                        ? flushLatestProgressUpdates
                       : undefined,
                     onPartialReply: undefined,
                     onNarrationUpdate: account.progressEvents?.narration
-                      ? async (payload: { text?: string }) => {
-                          const text = normalizeProgressEventText(payload.text);
-                          if (text) {
-                            sendProgressEventMessage(`💬 ${text}`);
-                          }
+                      ? (payload: { text?: string }) => {
+                          latestNarrationProgressText = normalizeProgressEventText(payload.text);
                         }
                       : undefined,
                     onReasoningStream: account.progressEvents?.reasoning
@@ -1408,7 +1416,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         }
                       : undefined,
                     onItemEvent: account.progressEvents?.item
-                      ? async (payload: {
+                      ? (payload: {
                           kind?: string;
                           progressText?: string;
                           summary?: string;
@@ -1418,7 +1426,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         }) => {
                           const text = resolveProgressItemEventText(payload);
                           if (text) {
-                            sendProgressEventMessage(text);
+                            latestItemProgressText = text;
                           }
                         }
                       : undefined,
@@ -1447,7 +1455,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         }
                       : undefined,
                     onPlanUpdate: account.progressEvents?.planUpdate
-                      ? async (payload: {
+                      ? (payload: {
                           steps?: Array<{ step?: string; status?: string }>;
                           text?: string;
                           summary?: string;
@@ -1455,7 +1463,7 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         }) => {
                           const text = resolveProgressPlanUpdateText(payload);
                           if (text) {
-                            sendProgressEventMessage(text);
+                            latestPlanProgressText = text;
                           }
                         }
                       : undefined,
@@ -1535,12 +1543,6 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         if (pendingRemoteMedia.length === 0 && localMediaPaths.length === 0) {
                           return;
                         }
-                      }
-                      if (wasVisibleBlockReplyText(pendingText)) {
-                        log?.info?.(
-                          `naverworks[${account.accountId}]: skipped duplicate final text already delivered as block reply to ${event.userId}`,
-                        );
-                        pendingText = undefined;
                       }
                       if (pendingText) {
                         log?.info?.(
