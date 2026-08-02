@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveAccount } from "./accounts.js";
 import {
+  createNaverWorksBlockReplyFlushBufferForTest,
   createNaverWorksPlugin,
   downloadNaverWorksInboundMedia,
   parseNaverWorksDebugCommand,
@@ -340,6 +341,28 @@ describe("naverworks channel plugin", () => {
         payload: { kind: "reasoning", title: "reasoning", status: "running" },
       }),
     ).toBeUndefined();
+  });
+
+  it("buffers block replies and emits only complete flush messages", async () => {
+    const flushed: string[] = [];
+    const buffer = createNaverWorksBlockReplyFlushBufferForTest({
+      includeReasoning: false,
+      onFlush: (text) => {
+        flushed.push(text);
+      },
+    });
+
+    buffer.enqueue({ text: "첫 번째 중간 응답" });
+    buffer.enqueue({ body: "두 번째 중간 응답" });
+    buffer.enqueue({ text: "숨겨질 reasoning", isReasoning: true });
+
+    expect(flushed).toEqual([]);
+
+    await buffer.flush();
+    expect(flushed).toEqual(["첫 번째 중간 응답\n\n두 번째 중간 응답"]);
+
+    await buffer.flush();
+    expect(flushed).toEqual(["첫 번째 중간 응답\n\n두 번째 중간 응답"]);
   });
 
   it("switches the third placeholder heartbeat to a long-running notice", () => {

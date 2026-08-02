@@ -456,6 +456,50 @@ export function resolveNaverWorksPartialReplyProgressText(
   };
 }
 
+type NaverWorksBlockReplyProgressPayload = {
+  text?: string;
+  body?: string;
+  isReasoning?: boolean;
+};
+
+function createNaverWorksBlockReplyFlushBuffer(params: {
+  includeReasoning: boolean;
+  onFlush: (text: string) => void | Promise<void>;
+}): {
+  enqueue: (payload: NaverWorksBlockReplyProgressPayload) => void;
+  flush: () => Promise<void>;
+} {
+  const chunks: string[] = [];
+  return {
+    enqueue: (payload) => {
+      if (payload.isReasoning && !params.includeReasoning) {
+        return;
+      }
+      const text = normalizeProgressEventText(payload.text ?? payload.body);
+      if (text) {
+        chunks.push(text);
+      }
+    },
+    flush: async () => {
+      const text = normalizeProgressEventText(chunks.join("\n\n"));
+      chunks.length = 0;
+      if (text) {
+        await params.onFlush(text);
+      }
+    },
+  };
+}
+
+export function createNaverWorksBlockReplyFlushBufferForTest(params: {
+  includeReasoning: boolean;
+  onFlush: (text: string) => void | Promise<void>;
+}): {
+  enqueue: (payload: NaverWorksBlockReplyProgressPayload) => void;
+  flush: () => Promise<void>;
+} {
+  return createNaverWorksBlockReplyFlushBuffer(params);
+}
+
 type NaverWorksReplyUsageSummary = {
   provider?: string;
   model?: string;
@@ -1305,6 +1349,15 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
             };
             const sourceReplyDeliveryMode = "automatic";
             try {
+              const blockReplyFlushBuffer = createNaverWorksBlockReplyFlushBuffer({
+                includeReasoning: account.progressEvents?.reasoning === true,
+                onFlush: async (text) => {
+                  await sendProgressEventMessage(text, {
+                    force: true,
+                    rememberBlockReply: true,
+                  });
+                },
+              });
               const dispatchResult =
                 await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
                   ctx: msgCtx,
@@ -1320,21 +1373,13 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                     commentaryPayloadsEnabled: true,
                     reasoningPayloadsEnabled: account.progressEvents?.reasoning ? true : undefined,
                     onBlockReplyQueued: account.progressEvents?.blockReply
-                      ? async (payload: {
-                          text?: string;
-                          body?: string;
-                          isReasoning?: boolean;
-                        }) => {
-                          if (payload.isReasoning && !account.progressEvents?.reasoning) {
-                            return;
-                          }
-                          const text = normalizeProgressEventText(payload.text ?? payload.body);
-                          if (text) {
-                            await sendProgressEventMessage(text, {
-                              force: true,
-                              rememberBlockReply: true,
-                            });
-                          }
+                      ? (payload: NaverWorksBlockReplyProgressPayload) => {
+                          blockReplyFlushBuffer.enqueue(payload);
+                        }
+                      : undefined,
+                    onBlockReplyFlush: account.progressEvents?.blockReply
+                      ? async () => {
+                          await blockReplyFlushBuffer.flush();
                         }
                       : undefined,
                     onPartialReply: undefined,
