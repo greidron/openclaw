@@ -98,6 +98,9 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
 const activeRouteUnregisters = new Map<string, () => void>();
 const INLINE_THINK_DIRECTIVE_RE = /(^|\s)\/(?:think|thinking|t)(?::|\s|$)/i;
 const FAILED_REPLY_NOTICE = "처리에 실패했습니다. 잠시 후 다시 시도해주세요.";
+const DELIVERY_FAILED_NOTICE = "답변 전송에 실패했습니다. 잠시 후 다시 시도해주세요.";
+const FINAL_REPLY_SEND_RETRY_ATTEMPTS = 5;
+const FINAL_REPLY_SEND_RETRY_INITIAL_DELAY_MS = 1_000;
 const debugSummaryOverrides = new Map<string, "on" | "off" | "once">();
 
 type AutoThinkingLevel = "low" | "medium" | "high";
@@ -619,6 +622,50 @@ async function sendProgressMessage(params: {
       `naverworks[${params.account.accountId}]: progress message send threw userId=${params.userId}: ${String(error)}`,
     );
   }
+}
+
+async function sendNaverWorksTextWithRetries(params: {
+  account: ReturnType<typeof resolveAccount>;
+  userId: string;
+  text: string;
+  attempts?: number;
+  log?: {
+    info?: (...args: unknown[]) => void;
+    warn?: (...args: unknown[]) => void;
+    error?: (...args: unknown[]) => void;
+  };
+}): Promise<Awaited<ReturnType<typeof sendMessageNaverWorks>>> {
+  const attempts = Math.max(1, params.attempts ?? 3);
+  let lastResult: Awaited<ReturnType<typeof sendMessageNaverWorks>> | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const sent = await sendMessageNaverWorks({
+      account: params.account,
+      toUserId: params.userId,
+      text: params.text,
+    });
+    if (sent.ok) {
+      if (attempt > 1) {
+        params.log?.info?.(
+          `naverworks[${params.account.accountId}]: text delivery succeeded after retry attempt=${attempt} to ${params.userId}`,
+        );
+      }
+      return sent;
+    }
+    lastResult = sent;
+    params.log?.warn?.(
+      `naverworks[${params.account.accountId}]: text delivery attempt ${attempt}/${attempts} failed to ${params.userId} (reason=${sent.reason}, status=${sent.status ?? "unknown"}, body=${sent.body?.slice(0, 300) ?? ""})`,
+    );
+    if (attempt < attempts) {
+      const delayMs = FINAL_REPLY_SEND_RETRY_INITIAL_DELAY_MS * 2 ** (attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return (
+    lastResult ?? {
+      ok: false,
+      reason: "http-error",
+    }
+  );
 }
 
 export function resolveNaverWorksHeartbeatProgressTextForTest(
@@ -1434,6 +1481,11 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         `naverworks[${account.accountId}]: outbound routing pendingText=${pendingText ? "yes" : "no"} remoteMediaRemaining=${pendingRemoteMedia.length} localMediaRemaining=${localMediaPaths.length}`,
                       );
                       if (info?.kind && info.kind !== "final") {
+                        if (pendingText) {
+                          log?.info?.(
+                            `naverworks[${account.accountId}]: dropping non-final text payload kind=${info.kind} textChars=${pendingText.length}`,
+                          );
+                        }
                         pendingText = undefined;
                         if (pendingRemoteMedia.length === 0 && localMediaPaths.length === 0) {
                           return;
@@ -1449,10 +1501,12 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                         log?.info?.(
                           `naverworks[${account.accountId}]: sending standalone text message to ${event.userId} textChars=${pendingText.length}`,
                         );
-                        const sent = await sendMessageNaverWorks({
+                        const sent = await sendNaverWorksTextWithRetries({
                           account,
-                          toUserId: event.userId,
+                          userId: event.userId,
                           text: pendingText,
+                          attempts: FINAL_REPLY_SEND_RETRY_ATTEMPTS,
+                          log,
                         });
 
                         if (!sent.ok) {
@@ -1460,17 +1514,25 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                             log?.warn?.(
                               `naverworks[${account.accountId}]: outbound skipped (set botId and auth settings to enable delivery)`,
                             );
-                            return;
-                          }
-                          if (sent.reason === "auth-error") {
+                          } else if (sent.reason === "auth-error") {
                             log?.error?.(
                               `naverworks[${account.accountId}]: outbound auth failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""} (check accessToken or JWT auth settings)`,
                             );
-                            return;
+                          } else {
+                            log?.error?.(
+                              `naverworks[${account.accountId}]: outbound send failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""}`,
+                            );
                           }
-                          log?.error?.(
-                            `naverworks[${account.accountId}]: outbound send failed status=${sent.status ?? "unknown"} body=${sent.body?.slice(0, 300) ?? ""}`,
-                          );
+                          const noticeSent = await sendMessageNaverWorks({
+                            account,
+                            toUserId: event.userId,
+                            text: DELIVERY_FAILED_NOTICE,
+                          });
+                          if (!noticeSent.ok) {
+                            log?.warn?.(
+                              `naverworks[${account.accountId}]: failed to send delivery failure notice to ${event.userId} (reason=${noticeSent.reason}, status=${noticeSent.status ?? "unknown"}, body=${noticeSent.body?.slice(0, 300) ?? ""})`,
+                            );
+                          }
                           return;
                         }
 
@@ -1566,6 +1628,16 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                 log?.warn?.(
                   `naverworks[${account.accountId}]: agent run completed without a visible source reply for ${event.userId} (fallbackEligible=${dispatchResult.noVisibleReplyFallbackEligible ? "yes" : "no"})`,
                 );
+                const fallbackSent = await sendMessageNaverWorks({
+                  account,
+                  toUserId: event.userId,
+                  text: FAILED_REPLY_NOTICE,
+                });
+                if (!fallbackSent.ok) {
+                  log?.warn?.(
+                    `naverworks[${account.accountId}]: failed to send no-visible-reply fallback to ${event.userId} (reason=${fallbackSent.reason}, status=${fallbackSent.status ?? "unknown"}, body=${fallbackSent.body?.slice(0, 300) ?? ""})`,
+                  );
+                }
               }
               const debugDecision = resolveDebugSummaryDecision({
                 account,
