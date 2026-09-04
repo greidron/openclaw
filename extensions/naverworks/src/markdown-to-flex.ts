@@ -64,12 +64,14 @@ export function hasMarkdownFeatures(text: string): boolean {
   }
   MARKDOWN_TABLE_REGEX.lastIndex = 0;
   MARKDOWN_CODE_BLOCK_REGEX.lastIndex = 0;
+  CLICKABLE_URL_CANDIDATE_RE.lastIndex = 0;
   return (
     MARKDOWN_TABLE_REGEX.test(input) ||
     MARKDOWN_CODE_BLOCK_REGEX.test(input) ||
     /^\s*[-*+]\s+/m.test(input) ||
     /^\s*#{1,6}\s+/m.test(input) ||
-    /\[[^\]]+\]\([^)]+\)/.test(input)
+    /\[[^\]]+\]\([^)]+\)/.test(input) ||
+    CLICKABLE_URL_CANDIDATE_RE.test(input)
   );
 }
 
@@ -144,6 +146,7 @@ function normalizeInlineMarkdown(text: string): string {
 }
 
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:)\]}]+$/;
+const LINK_TEXT_COLOR = "#0969da";
 const CLICKABLE_URL_CANDIDATE_RE =
   /(?:https?:\/\/|www\.)(?:[^\s<>"']+)|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"']*)?/gi;
 
@@ -235,7 +238,10 @@ export function createTextLineComponents(
     const only = segments[0];
     return [
       {
-        ...createTextComponent(text, options),
+        ...createTextComponent(text, {
+          ...options,
+          color: only?.uri ? LINK_TEXT_COLOR : options?.color,
+        }),
         action: only?.uri ? { type: "uri" as const, uri: only.uri } : undefined,
       },
     ];
@@ -248,7 +254,7 @@ export function createTextLineComponents(
       contents: segments.map((segment) => ({
         ...createTextComponent(segment.text, {
           bold: options?.bold,
-          color: options?.color,
+          color: segment.uri ? LINK_TEXT_COLOR : options?.color,
           size: options?.size,
         }),
         action: segment.uri ? { type: "uri" as const, uri: segment.uri } : undefined,
@@ -277,6 +283,9 @@ function createExpandedTableRowComponents(
     for (const [index, header] of table.headers.entries()) {
       const label = header.trim() || `Column ${index + 1}`;
       const value = row[index]?.trim() || "-";
+      if (rowContents.length > 0) {
+        rowContents.push({ type: "separator", margin: "sm" });
+      }
       rowContents.push({
         type: "box",
         layout: "vertical",

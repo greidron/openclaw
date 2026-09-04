@@ -86,7 +86,7 @@ describe("naverworks channel plugin", () => {
     ).rejects.toThrow(/not configured for outbound delivery/i);
   });
 
-  it("sends text and image as separate messages from outbound sendMedia", async () => {
+  it("sends text and multiple images as separate messages from outbound sendMedia", async () => {
     const plugin = createNaverWorksPlugin();
     if (!plugin.outbound?.sendMedia) {
       throw new Error("outbound.sendMedia missing");
@@ -108,15 +108,54 @@ describe("naverworks channel plugin", () => {
       to: "user-1",
       text: "caption",
       mediaUrl: "https://example.com/photo.png",
+      mediaUrls: ["https://example.com/photo-2.png"],
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(
       String((fetchMock.mock.calls[0]?.[1] as { body?: string } | undefined)?.body ?? ""),
     ).toContain('"type":"text"');
     expect(
       String((fetchMock.mock.calls[1]?.[1] as { body?: string } | undefined)?.body ?? ""),
     ).toContain('"type":"image"');
+    expect(
+      String((fetchMock.mock.calls[2]?.[1] as { body?: string } | undefined)?.body ?? ""),
+    ).toContain('"type":"image"');
+  });
+
+  it("keeps sending later outbound media when one attachment fails", async () => {
+    const plugin = createNaverWorksPlugin();
+    if (!plugin.outbound?.sendMedia) {
+      throw new Error("outbound.sendMedia missing");
+    }
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("bad image", { status: 500 }))
+      .mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    setNaverWorksRuntime({ log: { info: vi.fn(), warn: vi.fn() } } as never);
+
+    await plugin.outbound.sendMedia({
+      cfg: {
+        channels: {
+          naverworks: {
+            botId: "bot-1",
+            accessToken: "token-1",
+          },
+        },
+      } as never,
+      to: "user-1",
+      mediaUrls: ["https://example.com/bad.png", "https://example.com/good.png"],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      String((fetchMock.mock.calls[1]?.[1] as { body?: string } | undefined)?.body ?? ""),
+    ).toContain("good.png");
+    expect(
+      String((fetchMock.mock.calls[2]?.[1] as { body?: string } | undefined)?.body ?? ""),
+    ).toContain("일부 첨부 전송에 실패했습니다.");
   });
 
   it("resolves NAVER WORKS attachment fileId through the authenticated redirect", async () => {

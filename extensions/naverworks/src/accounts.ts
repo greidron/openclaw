@@ -23,6 +23,13 @@ const DEFAULT_DEBUG_SUMMARY: Required<NonNullable<NaverWorksAccount["debugSummar
   includeCosts: true,
 };
 
+const DEFAULT_AUTO_ATTACH_IMAGE_LINKS: Required<
+  NonNullable<NaverWorksAccount["autoAttachImageLinks"]>
+> = {
+  enabled: false,
+  maxImages: 5,
+};
+
 const DEFAULT_STATUS_STICKERS: Required<NonNullable<NaverWorksAccount["statusStickers"]>> = {
   enabled: true,
   sticker: {
@@ -125,6 +132,14 @@ export function resolveAccount(
   const accountStatusSticker = (accountStatusStickers.sticker ?? {}) as Record<string, unknown>;
   const sectionDebugSummary = (section.debugSummary ?? {}) as Record<string, unknown>;
   const accountDebugSummary = (accountCfg.debugSummary ?? {}) as Record<string, unknown>;
+  const sectionAutoAttachImageLinks = (section.autoAttachImageLinks ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const accountAutoAttachImageLinks = (accountCfg.autoAttachImageLinks ?? {}) as Record<
+    string,
+    unknown
+  >;
   const sectionProgressEvents = (section.progressEvents ?? {}) as Record<string, unknown>;
   const accountProgressEvents = (accountCfg.progressEvents ?? {}) as Record<string, unknown>;
   const progressMessageEmojis = [
@@ -299,6 +314,16 @@ export function resolveAccount(
         (accountDebugSummary.includeCosts as boolean | undefined) ??
         (sectionDebugSummary.includeCosts as boolean | undefined) ??
         DEFAULT_DEBUG_SUMMARY.includeCosts,
+    },
+    autoAttachImageLinks: {
+      enabled:
+        (accountAutoAttachImageLinks.enabled as boolean | undefined) ??
+        (sectionAutoAttachImageLinks.enabled as boolean | undefined) ??
+        DEFAULT_AUTO_ATTACH_IMAGE_LINKS.enabled,
+      maxImages:
+        asPositiveInteger(accountAutoAttachImageLinks.maxImages) ??
+        asPositiveInteger(sectionAutoAttachImageLinks.maxImages) ??
+        DEFAULT_AUTO_ATTACH_IMAGE_LINKS.maxImages,
     },
   };
 }

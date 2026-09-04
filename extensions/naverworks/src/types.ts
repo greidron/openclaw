@@ -58,6 +58,10 @@ export type NaverWorksAccount = {
     enabled: boolean;
     includeCosts: boolean;
   };
+  autoAttachImageLinks?: {
+    enabled: boolean;
+    maxImages: number;
+  };
 };
 
 export type NaverWorksInboundEvent = {

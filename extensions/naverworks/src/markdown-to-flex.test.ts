@@ -27,6 +27,19 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     expect(payload).toBeTruthy();
     expect(JSON.stringify(payload)).toContain('"type":"uri"');
     expect(JSON.stringify(payload)).toContain('"uri":"https://docs.openclaw.ai/configuration"');
+    expect(JSON.stringify(payload)).toContain('"color":"#0969da"');
+  });
+
+  it("converts plain text with bare URLs so links are visibly clickable", () => {
+    expect(hasMarkdownFeatures("See https://docs.openclaw.ai/configuration")).toBe(true);
+
+    const payload = markdownToNaverWorksFlexTemplate(
+      "See https://docs.openclaw.ai/configuration",
+    );
+
+    expect(payload).toBeTruthy();
+    expect(JSON.stringify(payload)).toContain('"type":"uri"');
+    expect(JSON.stringify(payload)).toContain('"color":"#0969da"');
   });
 
   it("normalizes domain-only URLs and strips trailing punctuation", () => {
@@ -110,6 +123,8 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     const serialized = JSON.stringify(payload);
     expect(serialized).not.toContain('"layout":"horizontal"');
     expect(serialized).toContain('"uri":"https://docs.openclaw.ai/"');
+    expect(serialized).toContain('"text":"URL"');
+    expect(serialized).toContain('"text":"docs.openclaw.ai"');
   });
 
   it("expands all table rows into vertical key-value rows", () => {

@@ -142,6 +142,34 @@ describe("resolveAccount", () => {
     expect(account.markdownMode).toBe("auto-flex");
   });
 
+  it("keeps inline image auto-attach disabled unless configured", () => {
+    expect(resolveAccount({ channels: { naverworks: {} } }, "default").autoAttachImageLinks).toEqual(
+      {
+        enabled: false,
+        maxImages: 5,
+      },
+    );
+
+    expect(
+      resolveAccount(
+        {
+          channels: {
+            naverworks: {
+              autoAttachImageLinks: {
+                enabled: true,
+                maxImages: 2,
+              },
+            },
+          },
+        },
+        "default",
+      ).autoAttachImageLinks,
+    ).toEqual({
+      enabled: true,
+      maxImages: 2,
+    });
+  });
+
   it("merges progressMessages with account override", () => {
     const account = resolveAccount(
       {

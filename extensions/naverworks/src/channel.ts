@@ -5,7 +5,6 @@ import {
   buildChannelConfigSchema,
   setAccountEnabledInConfigSection,
 } from "openclaw/plugin-sdk/core";
-import { resolveOutboundMediaUrls } from "openclaw/plugin-sdk/reply-payload";
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/routing";
 import { registerPluginHttpRoute } from "openclaw/plugin-sdk/webhook-ingress";
 import { z } from "zod";
@@ -91,6 +90,12 @@ const NaverWorksConfigSchema = buildChannelConfigSchema(
           includeCosts: z.boolean().optional(),
         })
         .optional(),
+      autoAttachImageLinks: z
+        .object({
+          enabled: z.boolean().optional(),
+          maxImages: z.number().int().positive().optional(),
+        })
+        .optional(),
     })
     .passthrough(),
 );
@@ -101,6 +106,7 @@ const FAILED_REPLY_NOTICE = "처리에 실패했습니다. 잠시 후 다시 시
 const DELIVERY_FAILED_NOTICE = "답변 전송에 실패했습니다. 잠시 후 다시 시도해주세요.";
 const FINAL_REPLY_SEND_RETRY_ATTEMPTS = 5;
 const FINAL_REPLY_SEND_RETRY_INITIAL_DELAY_MS = 1_000;
+const IMAGE_LINK_PROBE_TIMEOUT_MS = 2_500;
 const debugSummaryOverrides = new Map<string, "on" | "off" | "once">();
 
 type AutoThinkingLevel = "low" | "medium" | "high";
@@ -109,6 +115,7 @@ type NaverWorksChannelOutboundContext = {
   to: string;
   text?: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   accountId?: string | null;
 };
 
@@ -232,6 +239,162 @@ function formatDeliveryLog(delivery: NaverWorksSendDelivery): string {
     `uploadedFileId=${delivery.uploadedFileId ? "yes" : "no"}`,
     `remoteMediaUrl=${delivery.remoteMediaUrl ? "yes" : "no"}`,
   ].join(" ");
+}
+
+function normalizeInlineUrl(value: string): string | undefined {
+  const trimmed = value
+    .trim()
+    .replace(/[),.;:!?]+$/g, "")
+    .replace(/^<+|>+$/g, "");
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.username || parsed.password) {
+      return undefined;
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function isPrivateOrLocalHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) {
+    return true;
+  }
+  if (host === "::1" || host.startsWith("fe80:")) {
+    return true;
+  }
+  const match = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+  if (!match) {
+    return false;
+  }
+  const [, aRaw, bRaw] = match;
+  const a = Number(aRaw);
+  const b = Number(bRaw);
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+function extractInlineHttpUrls(text?: string): string[] {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const match of text?.matchAll(/https?:\/\/[^\s<>"'`]+/gi) ?? []) {
+    const url = normalizeInlineUrl(match[0]);
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
+
+function resolveNaverWorksOutboundMediaUrls(payload: {
+  mediaUrl?: string;
+  mediaUrls?: string[];
+}): string[] {
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const mediaUrl of [...(payload.mediaUrls ?? []), payload.mediaUrl]) {
+    const trimmed = mediaUrl?.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    resolved.push(trimmed);
+  }
+  return resolved;
+}
+
+function hasImageFileExtension(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /\.(png|jpe?g|gif|webp|bmp|heic|svg)$/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function isReachableImageUrl(url: string): Promise<boolean> {
+  const parsed = new URL(url);
+  if (!/^https?:$/i.test(parsed.protocol) || isPrivateOrLocalHostname(parsed.hostname)) {
+    return false;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), IMAGE_LINK_PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (response.ok && contentType.startsWith("image/")) {
+      return true;
+    }
+    if (response.ok && !contentType && hasImageFileExtension(url)) {
+      return true;
+    }
+  } catch {
+    // Fall through to a small GET probe; some hosts reject HEAD for image assets.
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const getController = new AbortController();
+  const getTimeout = setTimeout(() => getController.abort(), IMAGE_LINK_PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+      redirect: "follow",
+      signal: getController.signal,
+    });
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    return response.ok && (contentType.startsWith("image/") || hasImageFileExtension(url));
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(getTimeout);
+  }
+}
+
+async function resolveAutoAttachedImageLinks(params: {
+  account: ReturnType<typeof resolveAccount>;
+  text?: string;
+  existingMediaUrls: string[];
+  log?: {
+    info?: (...args: unknown[]) => void;
+  };
+}): Promise<string[]> {
+  if (params.account.autoAttachImageLinks?.enabled !== true || !params.text?.trim()) {
+    return [];
+  }
+  const existing = new Set(params.existingMediaUrls);
+  const candidates = extractInlineHttpUrls(params.text)
+    .filter((url) => !existing.has(url))
+    .slice(0, params.account.autoAttachImageLinks.maxImages);
+  const attached: string[] = [];
+  for (const url of candidates) {
+    if (await isReachableImageUrl(url).catch(() => false)) {
+      attached.push(url);
+    }
+  }
+  if (attached.length > 0) {
+    params.log?.info?.(
+      `naverworks[${params.account.accountId}]: auto-attached ${attached.length} inline image link(s)`,
+    );
+  }
+  return attached;
 }
 
 function resolveAutoThinkingLevel(params: {
@@ -1063,11 +1226,15 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
         to,
         text,
         mediaUrl,
+        mediaUrls,
         accountId,
       }: NaverWorksChannelOutboundContext) => {
         const account = resolveAccount(cfg as Record<string, unknown>, accountId);
         const caption = text?.trim();
-        const mediaHref = mediaUrl?.trim();
+        const mediaHrefs = resolveNaverWorksOutboundMediaUrls({ mediaUrl, mediaUrls });
+        if (mediaHrefs.length === 0) {
+          throw new Error(`NAVER WORKS media send failed: no media URL provided (to=${to}).`);
+        }
         if (caption) {
           const sentText = await sendMessageNaverWorks({
             account,
@@ -1076,31 +1243,55 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
           });
           if (!sentText.ok) {
             throw new Error(
-              `NAVER WORKS text preface failed (${sentText.reason}, status=${sentText.status ?? "unknown"}, to=${to}, mediaUrl=${mediaHref ?? "none"}): ${sentText.body?.slice(0, 300) ?? ""}`,
+              `NAVER WORKS text preface failed (${sentText.reason}, status=${sentText.status ?? "unknown"}, to=${to}, mediaCount=${mediaHrefs.length}): ${sentText.body?.slice(0, 300) ?? ""}`,
             );
           }
           getNaverWorksRuntime().log?.info?.(
             `naverworks[${account.accountId}]: outbound sendMedia text preface delivered to=${to} ${formatDeliveryLog(sentText.delivery)}`,
           );
         }
-        const sentMedia = await sendMessageNaverWorks({
-          account,
-          toUserId: to,
-          mediaUrl,
-        });
-        if (!sentMedia.ok) {
-          if (sentMedia.reason === "not-configured") {
-            throw new Error(
-              `NAVER WORKS account \"${account.accountId}\" is not configured for media outbound delivery (set botId and auth settings).`,
+        const failures: string[] = [];
+        for (const mediaHref of mediaHrefs) {
+          const sentMedia = await sendMessageNaverWorks({
+            account,
+            toUserId: to,
+            mediaUrl: mediaHref,
+          });
+          if (!sentMedia.ok) {
+            if (sentMedia.reason === "not-configured") {
+              throw new Error(
+                `NAVER WORKS account \"${account.accountId}\" is not configured for media outbound delivery (set botId and auth settings).`,
+              );
+            }
+            failures.push(
+              `${mediaHref}: ${sentMedia.reason}, status=${sentMedia.status ?? "unknown"}, body=${sentMedia.body?.slice(0, 300) ?? ""}`,
             );
+            getNaverWorksRuntime().log?.warn?.(
+              `naverworks[${account.accountId}]: outbound sendMedia failed to=${to} mediaUrl=${mediaHref} reason=${sentMedia.reason} status=${sentMedia.status ?? "unknown"} body=${sentMedia.body?.slice(0, 300) ?? ""}`,
+            );
+            continue;
           }
-          throw new Error(
-            `NAVER WORKS media send failed (${sentMedia.reason}, status=${sentMedia.status ?? "unknown"}, to=${to}, mediaUrl=${mediaHref ?? "none"}): ${sentMedia.body?.slice(0, 300) ?? ""}`,
+          getNaverWorksRuntime().log?.info?.(
+            `naverworks[${account.accountId}]: outbound sendMedia delivered to=${to} ${formatDeliveryLog(sentMedia.delivery)}`,
           );
         }
-        getNaverWorksRuntime().log?.info?.(
-          `naverworks[${account.accountId}]: outbound sendMedia delivered to=${to} ${formatDeliveryLog(sentMedia.delivery)}`,
-        );
+        if (failures.length === mediaHrefs.length) {
+          throw new Error(
+            `NAVER WORKS media send failed for all ${mediaHrefs.length} attachment(s) (to=${to}): ${failures.join("; ")}`,
+          );
+        }
+        if (failures.length > 0) {
+          const noticeSent = await sendMessageNaverWorks({
+            account,
+            toUserId: to,
+            text: `일부 첨부 전송에 실패했습니다. (${failures.length}/${mediaHrefs.length})`,
+          });
+          if (!noticeSent.ok) {
+            getNaverWorksRuntime().log?.warn?.(
+              `naverworks[${account.accountId}]: failed to send partial media failure notice to=${to} reason=${noticeSent.reason} status=${noticeSent.status ?? "unknown"} body=${noticeSent.body?.slice(0, 300) ?? ""}`,
+            );
+          }
+        }
         return {
           channel: CHANNEL_ID,
           messageId: `naverworks:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
@@ -1512,10 +1703,21 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                       info?: { kind?: string },
                     ) => {
                       const text = payload?.text ?? payload?.body;
-                      const mediaUrls = resolveOutboundMediaUrls(payload ?? {});
+                      const explicitMediaUrls = resolveNaverWorksOutboundMediaUrls(payload ?? {});
+                      const autoAttachedImageLinks =
+                        !info?.kind || info.kind === "final"
+                          ? await resolveAutoAttachedImageLinks({
+                              account,
+                              text,
+                              existingMediaUrls: explicitMediaUrls,
+                              log,
+                            })
+                          : [];
+                      const mediaUrls = [...explicitMediaUrls, ...autoAttachedImageLinks];
                       const remoteMediaUrls = mediaUrls.filter((url) => /^https?:\/\//i.test(url));
                       const localMediaPaths = mediaUrls.filter((url) => !/^https?:\/\//i.test(url));
                       const pendingRemoteMedia = [...remoteMediaUrls];
+                      const failedMediaDeliveries: string[] = [];
                       let pendingText = text;
                       if (!info?.kind || info.kind === "final") {
                         await stopProgressMessageHeartbeat();
@@ -1614,7 +1816,8 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                           log?.error?.(
                             `naverworks[${account.accountId}]: outbound media send failed status=${sentMedia.status ?? "unknown"} body=${sentMedia.body?.slice(0, 300) ?? ""}`,
                           );
-                          return;
+                          failedMediaDeliveries.push(mediaUrl);
+                          continue;
                         }
                         log?.info?.(
                           `naverworks[${account.accountId}]: outbound media delivered to ${event.userId} ${formatDeliveryLog(sentMedia.delivery)}`,
@@ -1647,12 +1850,26 @@ export function createNaverWorksPlugin(): ChannelPlugin<NaverWorksAccount> {
                           log?.error?.(
                             `naverworks[${account.accountId}]: outbound local media send failed status=${sentMedia.status ?? "unknown"} body=${sentMedia.body?.slice(0, 300) ?? ""}`,
                           );
-                          return;
+                          failedMediaDeliveries.push(mediaPath);
+                          continue;
                         }
                         log?.info?.(
                           `naverworks[${account.accountId}]: outbound local media delivered to ${event.userId} ${formatDeliveryLog(sentMedia.delivery)}`,
                         );
                         markVisibleReplyDelivery();
+                      }
+                      if (failedMediaDeliveries.length > 0) {
+                        const totalMediaCount = pendingRemoteMedia.length + localMediaPaths.length;
+                        const noticeSent = await sendMessageNaverWorks({
+                          account,
+                          toUserId: event.userId,
+                          text: `일부 첨부 전송에 실패했습니다. (${failedMediaDeliveries.length}/${totalMediaCount})`,
+                        });
+                        if (!noticeSent.ok) {
+                          log?.warn?.(
+                            `naverworks[${account.accountId}]: failed to send partial media failure notice to ${event.userId} (reason=${noticeSent.reason}, status=${noticeSent.status ?? "unknown"}, body=${noticeSent.body?.slice(0, 300) ?? ""})`,
+                          );
+                        }
                       }
                     },
                   },
