@@ -44,6 +44,9 @@ export type NaverWorksFlexComponent =
       margin?: "none" | "sm" | "md";
       spacing?: "none" | "sm";
       flex?: number;
+      backgroundColor?: string;
+      cornerRadius?: "none" | "xs" | "sm" | "md" | "lg" | "xl" | "xxl";
+      paddingAll?: "none" | "xs" | "sm" | "md" | "lg" | "xl" | "xxl";
     };
 
 export type NaverWorksFlexBubble = {
@@ -70,6 +73,7 @@ export function hasMarkdownFeatures(text: string): boolean {
     MARKDOWN_CODE_BLOCK_REGEX.test(input) ||
     /^\s*[-*+]\s+/m.test(input) ||
     /^\s*#{1,6}\s+/m.test(input) ||
+    /`[^`]+`/.test(input) ||
     /\[[^\]]+\]\([^)]+\)/.test(input) ||
     CLICKABLE_URL_CANDIDATE_RE.test(input)
   );
@@ -138,8 +142,7 @@ function normalizeInlineMarkdown(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/__(.+?)__/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+    .replace(/`([^`]+)`/g, "「$1」")
     .replace(/^\s*[-*+]\s+/gm, "• ")
     .replace(/^\s*#{1,6}\s+/gm, "")
     .trim();
@@ -147,6 +150,7 @@ function normalizeInlineMarkdown(text: string): string {
 
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:)\]}]+$/;
 const LINK_TEXT_COLOR = "#0969da";
+const MARKDOWN_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/gi;
 const CLICKABLE_URL_CANDIDATE_RE =
   /(?:https?:\/\/|www\.)(?:[^\s<>"']+)|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"']*)?/gi;
 
@@ -186,30 +190,51 @@ export function splitTextIntoClickableSegments(
   text: string,
 ): Array<{ text: string; uri?: string }> {
   const segments: Array<{ text: string; uri?: string }> = [];
-  CLICKABLE_URL_CANDIDATE_RE.lastIndex = 0;
+  const appendPlainSegments = (plainText: string) => {
+    CLICKABLE_URL_CANDIDATE_RE.lastIndex = 0;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    while ((match = CLICKABLE_URL_CANDIDATE_RE.exec(plainText)) !== null) {
+      const matchedText = match[0] ?? "";
+      const normalizedUrl = normalizeClickableUrl(matchedText);
+      const start = match.index;
+      const trimmedMatch = trimTrailingUrlPunctuation(matchedText);
+      const trimmedLength = trimmedMatch.length;
+      const end = start + trimmedLength;
+
+      if (start > cursor) {
+        segments.push({ text: plainText.slice(cursor, start) });
+      }
+      if (trimmedLength > 0) {
+        segments.push({
+          text: plainText.slice(start, end),
+          uri: normalizedUrl,
+        });
+      }
+      cursor = start + matchedText.length;
+    }
+    if (cursor < plainText.length) {
+      segments.push({ text: plainText.slice(cursor) });
+    }
+  };
+
+  MARKDOWN_LINK_RE.lastIndex = 0;
   let cursor = 0;
   let match: RegExpExecArray | null;
-  while ((match = CLICKABLE_URL_CANDIDATE_RE.exec(text)) !== null) {
-    const matchedText = match[0] ?? "";
-    const normalizedUrl = normalizeClickableUrl(matchedText);
+  while ((match = MARKDOWN_LINK_RE.exec(text)) !== null) {
     const start = match.index;
-    const trimmedMatch = trimTrailingUrlPunctuation(matchedText);
-    const trimmedLength = trimmedMatch.length;
-    const end = start + trimmedLength;
-
     if (start > cursor) {
-      segments.push({ text: text.slice(cursor, start) });
+      appendPlainSegments(text.slice(cursor, start));
     }
-    if (trimmedLength > 0) {
-      segments.push({
-        text: text.slice(start, end),
-        uri: normalizedUrl,
-      });
+    const label = match[1]?.trim();
+    const uri = normalizeClickableUrl(match[2] ?? "");
+    if (label) {
+      segments.push({ text: label, uri });
     }
-    cursor = start + matchedText.length;
+    cursor = start + (match[0]?.length ?? 0);
   }
   if (cursor < text.length) {
-    segments.push({ text: text.slice(cursor) });
+    appendPlainSegments(text.slice(cursor));
   }
   return segments.filter((segment) => segment.text.length > 0);
 }
@@ -246,21 +271,31 @@ export function createTextLineComponents(
       },
     ];
   }
-  return [
-    {
-      type: "box" as const,
-      layout: "baseline" as const,
-      margin: options?.margin,
-      contents: segments.map((segment) => ({
-        ...createTextComponent(segment.text, {
-          bold: options?.bold,
-          color: segment.uri ? LINK_TEXT_COLOR : options?.color,
-          size: options?.size,
+  const uriSegments = segments.filter((segment) => segment.uri);
+  const displayText = segments.map((segment) => segment.text).join("");
+  if (uriSegments.length <= 1) {
+    return [
+      {
+        ...createTextComponent(displayText, {
+          ...options,
+          color:
+            uriSegments.length === 1 ? LINK_TEXT_COLOR : options?.color,
         }),
-        action: segment.uri ? { type: "uri" as const, uri: segment.uri } : undefined,
-      })),
-    },
-  ];
+        action: uriSegments[0]?.uri ? { type: "uri" as const, uri: uriSegments[0].uri } : undefined,
+      },
+    ];
+  }
+  return segments
+    .filter((segment) => segment.text.trim().length > 0)
+    .map((segment, index) => ({
+      ...createTextComponent(segment.text.trim(), {
+        bold: options?.bold,
+        color: segment.uri ? LINK_TEXT_COLOR : options?.color,
+        margin: index === 0 ? options?.margin : "sm",
+        size: options?.size,
+      }),
+      action: segment.uri ? { type: "uri" as const, uri: segment.uri } : undefined,
+    }));
 }
 
 function createTableRowComponents(
@@ -397,10 +432,24 @@ export function markdownToNaverWorksFlexTemplate(
         size: "md",
       }),
     );
-    for (const line of codeLines.slice(1)) {
-      contents.push(
-        ...createTextLineComponents(line, { margin: "sm", color: textColor, size: "md" }),
-      );
+    const codeContents = codeLines.slice(1).flatMap((line, index) =>
+      createTextLineComponents(line, {
+        margin: index === 0 ? "none" : "sm",
+        color: resolvedTheme === "dark" ? "#f5f5f5" : "#24292f",
+        size: "sm",
+      }),
+    );
+    if (codeContents.length > 0) {
+      contents.push({
+        type: "box",
+        layout: "vertical",
+        margin: "sm",
+        spacing: "sm",
+        backgroundColor: resolvedTheme === "dark" ? "#30363d" : "#f6f8fa",
+        cornerRadius: "md",
+        paddingAll: "md",
+        contents: codeContents,
+      });
     }
   }
 

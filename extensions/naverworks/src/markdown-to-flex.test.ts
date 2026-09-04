@@ -16,7 +16,9 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     expect(payload?.contents.type).toBe("bubble");
     expect(JSON.stringify(payload)).toContain("Status");
     expect(JSON.stringify(payload)).toContain("• item one");
-    expect(JSON.stringify(payload)).toContain("OpenClaw (https://openclaw.ai)");
+    expect(JSON.stringify(payload)).toContain('"text":"See OpenClaw"');
+    expect(JSON.stringify(payload)).toContain('"uri":"https://openclaw.ai/"');
+    expect(JSON.stringify(payload)).not.toContain("OpenClaw (https://openclaw.ai)");
   });
 
   it("adds uri actions to text nodes that contain URLs", () => {
@@ -50,9 +52,9 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     expect(payload).toBeTruthy();
     const serialized = JSON.stringify(payload);
     expect(serialized).toContain('"uri":"https://docs.openclaw.ai/configuration"');
-    expect(serialized).toContain('"text":"Read "');
+    expect(serialized).toContain('"text":"Read"');
     expect(serialized).toContain('"text":"docs.openclaw.ai/configuration"');
-    expect(serialized).toContain('"text":" then "');
+    expect(serialized).toContain('"text":"then"');
     expect(serialized).toContain('"text":"www.openclaw.ai/support"');
   });
 
@@ -63,7 +65,7 @@ describe("markdownToNaverWorksFlexTemplate", () => {
 
     expect(payload).toBeTruthy();
     const serialized = JSON.stringify(payload);
-    expect(serialized).toContain('"layout":"baseline"');
+    expect(serialized).not.toContain('"layout":"baseline"');
     expect(serialized).toContain('"uri":"https://docs.openclaw.ai/configuration"');
     expect(serialized).toContain('"uri":"https://openclaw.ai/support"');
   });
@@ -106,12 +108,22 @@ describe("markdownToNaverWorksFlexTemplate", () => {
     const serialized = JSON.stringify(payload);
     expect(serialized).toContain("Table");
     expect(serialized).toContain("Code (ts)");
+    expect(serialized).toContain('"backgroundColor":"#f6f8fa"');
+    expect(serialized).toContain('"cornerRadius":"md"');
+    expect(serialized).toContain('"paddingAll":"md"');
     expect(serialized).toContain('"text":"Key"');
     expect(serialized).toContain('"text":"mode"');
     expect(serialized).toContain('"text":"Value"');
     expect(serialized).toContain('"text":"auto-flex"');
     expect(serialized).not.toContain('"layout":"horizontal"');
     expect(serialized).toContain('"type":"separator"');
+  });
+
+  it("renders inline backtick spans with visible corner quotes", () => {
+    const payload = markdownToNaverWorksFlexTemplate("Use `openclaw config` here");
+
+    expect(payload).toBeTruthy();
+    expect(JSON.stringify(payload)).toContain("「openclaw config」");
   });
 
   it("keeps links clickable in expanded table cells", () => {
