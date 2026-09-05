@@ -27,7 +27,7 @@ const DEFAULT_AUTO_ATTACH_IMAGE_LINKS: Required<
   NonNullable<NaverWorksAccount["autoAttachImageLinks"]>
 > = {
   enabled: true,
-  maxImages: 5,
+  maxImages: 10,
 };
 
 const DEFAULT_STATUS_STICKERS: Required<NonNullable<NaverWorksAccount["statusStickers"]>> = {

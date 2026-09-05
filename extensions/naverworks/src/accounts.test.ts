@@ -146,7 +146,7 @@ describe("resolveAccount", () => {
     expect(resolveAccount({ channels: { naverworks: {} } }, "default").autoAttachImageLinks).toEqual(
       {
         enabled: true,
-        maxImages: 5,
+        maxImages: 10,
       },
     );
 
