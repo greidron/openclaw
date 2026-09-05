@@ -142,10 +142,10 @@ describe("resolveAccount", () => {
     expect(account.markdownMode).toBe("auto-flex");
   });
 
-  it("keeps inline image auto-attach disabled unless configured", () => {
+  it("enables inline image auto-attach by default", () => {
     expect(resolveAccount({ channels: { naverworks: {} } }, "default").autoAttachImageLinks).toEqual(
       {
-        enabled: false,
+        enabled: true,
         maxImages: 5,
       },
     );

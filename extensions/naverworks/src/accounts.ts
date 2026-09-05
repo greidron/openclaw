@@ -26,7 +26,7 @@ const DEFAULT_DEBUG_SUMMARY: Required<NonNullable<NaverWorksAccount["debugSummar
 const DEFAULT_AUTO_ATTACH_IMAGE_LINKS: Required<
   NonNullable<NaverWorksAccount["autoAttachImageLinks"]>
 > = {
-  enabled: false,
+  enabled: true,
   maxImages: 5,
 };
 
